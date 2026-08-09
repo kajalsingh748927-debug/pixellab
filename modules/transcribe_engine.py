@@ -157,18 +157,89 @@ def _transcribe_with_elevenlabs(audio_path: str) -> dict | None:
         return None
 
 
-# ── Whisper Transcription ────────────────────────────────────────────────────
+# ── Groq Whisper Transcription (cloud, zero local RAM) ───────────────────────
+
+def _transcribe_with_groq_whisper(audio_path: str) -> dict | None:
+    """
+    Uses Groq's free Whisper API (whisper-large-v3) for transcription.
+    Runs on Groq's servers — uses zero local RAM. Perfect for Render free tier.
+    Returns {full_text, word_timestamps, total_duration} or None on failure.
+    """
+    api_key = os.environ.get("GROQ_API_KEY", "")
+    if not api_key:
+        return None
+
+    safe_print("🎙️ Groq Whisper: transcribing audio...")
+
+    try:
+        import json
+
+        url = "https://api.groq.com/openai/v1/audio/transcriptions"
+        headers = {"Authorization": f"Bearer {api_key}"}
+
+        ext = os.path.splitext(audio_path)[-1].lower().lstrip(".")
+        mime_map = {
+            "mp3": "audio/mpeg", "wav": "audio/wav", "m4a": "audio/mp4",
+            "ogg": "audio/ogg", "flac": "audio/flac", "webm": "audio/webm",
+            "mp4": "audio/mp4",
+        }
+        mime_type = mime_map.get(ext, "audio/mpeg")
+
+        with open(audio_path, "rb") as f:
+            files = {"file": (os.path.basename(audio_path), f, mime_type)}
+            data = {
+                "model": "whisper-large-v3",
+                "response_format": "verbose_json",
+                "timestamp_granularities[]": "word",
+            }
+            res = requests.post(url, headers=headers, files=files, data=data, timeout=120)
+
+        if res.status_code != 200:
+            safe_print(f"Groq Whisper error ({res.status_code}): {res.text[:200]}")
+            return None
+
+        result = res.json()
+        full_text = result.get("text", "").strip()
+        total_duration = _get_audio_duration(audio_path)
+
+        # Extract word-level timestamps
+        word_timestamps = []
+        for w in result.get("words", []):
+            word = w.get("word", "").strip()
+            if word:
+                word_timestamps.append({
+                    "word":  word,
+                    "start": round(float(w.get("start", 0)), 3),
+                    "end":   round(float(w.get("end", 0)), 3),
+                })
+
+        if full_text and not word_timestamps:
+            safe_print("Groq Whisper: no word timestamps — using linear interpolation.")
+            word_timestamps = _linear_timestamps(full_text, total_duration)
+
+        safe_print(f"✅ Groq Whisper: {len(word_timestamps)} words | {total_duration:.1f}s")
+        return {
+            "full_text":       full_text,
+            "word_timestamps": word_timestamps,
+            "total_duration":  total_duration,
+        }
+
+    except Exception as e:
+        safe_print(f"Groq Whisper error: {e}")
+        return None
+
+
+# ── Local Whisper Transcription (fallback if Groq unavailable) ───────────────
 
 def _transcribe_with_whisper(audio_path: str) -> dict | None:
     """
-    Runs openai-whisper on the audio file.
-    Returns {"full_text", "word_timestamps", "total_duration"} or None if unavailable.
+    Runs openai-whisper locally. Only used if Groq is unavailable.
+    Returns {full_text, word_timestamps, total_duration} or None.
     """
     try:
         import whisper  # noqa: F401
     except ImportError:
-        safe_print("⚠️  openai-whisper is not installed.")
-        safe_print("    Install it with:  pip install openai-whisper")
+        safe_print("⚠️  openai-whisper not installed — skipping local Whisper.")
         return None
 
     # Ensure FFmpeg directory is in Windows system PATH for Whisper subprocesses
@@ -259,12 +330,17 @@ def transcribe_audio(audio_path: str) -> dict:
         result["method"] = "elevenlabs"
         return result
 
-    # ── Strategy 2: Whisper ───────────────────────────────────────────────────
+    # ── Strategy 2: Groq Whisper API (free, cloud, zero local RAM) ───────────
+    result = _transcribe_with_groq_whisper(audio_path)
+    if result and result.get("full_text"):
+        result["method"] = "groq_whisper"
+        return result
+
+    # ── Strategy 3: Local Whisper (if installed) ──────────────────────────────
     result = _transcribe_with_whisper(audio_path)
     if result:
         method = "whisper"
         if result["full_text"] and not result["word_timestamps"]:
-            # Whisper gave text but no word timestamps — use linear
             result["word_timestamps"] = _linear_timestamps(
                 result["full_text"], result["total_duration"]
             )
@@ -273,7 +349,7 @@ def transcribe_audio(audio_path: str) -> dict:
         if result["full_text"]:
             return result
 
-    # ── Strategy 3: Linear fallback (no Whisper, no ElevenLabs) ─────────────
+    # ── Strategy 4: Linear fallback (nothing worked) ─────────────────────────
     safe_print("Using linear timestamp interpolation fallback...")
     total_duration = _get_audio_duration(audio_path)
 
@@ -283,9 +359,7 @@ def transcribe_audio(audio_path: str) -> dict:
 
     if not full_text:
         safe_print(
-            "Could not transcribe audio text. "
-            "Set ELEVENLABS_API_KEY or install openai-whisper for accurate results. "
-            "The audio will still be used in the final video."
+            "Could not transcribe audio. Set GROQ_API_KEY or ELEVENLABS_API_KEY for transcription."
         )
         return {
             "full_text":       "",
