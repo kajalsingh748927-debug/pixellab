@@ -159,10 +159,56 @@ def _transcribe_with_elevenlabs(audio_path: str) -> dict | None:
 
 # ── Groq Whisper Transcription (cloud, zero local RAM) ───────────────────────
 
+def _transcribe_chunk_groq(audio_path: str, api_key: str) -> str:
+    """Send one audio chunk to Groq Whisper and return the text."""
+    url = "https://api.groq.com/openai/v1/audio/transcriptions"
+    headers = {"Authorization": f"Bearer {api_key}"}
+    ext = os.path.splitext(audio_path)[-1].lower().lstrip(".")
+    mime_map = {
+        "mp3": "audio/mpeg", "wav": "audio/wav", "m4a": "audio/mp4",
+        "ogg": "audio/ogg", "flac": "audio/flac", "webm": "audio/webm",
+    }
+    mime_type = mime_map.get(ext, "audio/mpeg")
+    with open(audio_path, "rb") as f:
+        files = {"file": (os.path.basename(audio_path), f, mime_type)}
+        data  = {"model": "whisper-large-v3-turbo", "response_format": "json"}
+        res   = requests.post(url, headers=headers, files=files, data=data, timeout=180)
+    if res.status_code == 200:
+        return res.json().get("text", "").strip()
+    safe_print(f"Groq chunk error ({res.status_code}): {res.text[:300]}")
+    return ""
+
+
+def _split_audio_chunks(audio_path: str, chunk_sec: int = 100) -> list:
+    """
+    Splits audio into chunk_sec-second WAV chunks using moviepy.
+    Returns list of temp file paths. Falls back to [audio_path] on error.
+    """
+    try:
+        from moviepy import AudioFileClip
+        import tempfile, math
+        clip     = AudioFileClip(audio_path)
+        duration = clip.duration
+        chunks   = []
+        for i in range(math.ceil(duration / chunk_sec)):
+            t_start = i * chunk_sec
+            t_end   = min(t_start + chunk_sec, duration)
+            sub     = clip.subclipped(t_start, t_end)
+            tmp     = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+            sub.write_audiofile(tmp.name, logger=None)
+            sub.close()
+            chunks.append((tmp.name, t_start))
+        clip.close()
+        return chunks
+    except Exception as e:
+        safe_print(f"Audio split error: {e}")
+        return [(audio_path, 0.0)]
+
+
 def _transcribe_with_groq_whisper(audio_path: str) -> dict | None:
     """
-    Uses Groq's free Whisper API (whisper-large-v3) for transcription.
-    Runs on Groq's servers — uses zero local RAM. Perfect for Render free tier.
+    Uses Groq's free Whisper API for transcription.
+    Handles long audio (>120s) by splitting into chunks.
     Returns {full_text, word_timestamps, total_duration} or None on failure.
     """
     api_key = os.environ.get("GROQ_API_KEY", "")
@@ -172,51 +218,34 @@ def _transcribe_with_groq_whisper(audio_path: str) -> dict | None:
     safe_print("🎙️ Groq Whisper: transcribing audio...")
 
     try:
-        import json
-
-        url = "https://api.groq.com/openai/v1/audio/transcriptions"
-        headers = {"Authorization": f"Bearer {api_key}"}
-
-        ext = os.path.splitext(audio_path)[-1].lower().lstrip(".")
-        mime_map = {
-            "mp3": "audio/mpeg", "wav": "audio/wav", "m4a": "audio/mp4",
-            "ogg": "audio/ogg", "flac": "audio/flac", "webm": "audio/webm",
-            "mp4": "audio/mp4",
-        }
-        mime_type = mime_map.get(ext, "audio/mpeg")
-
-        with open(audio_path, "rb") as f:
-            files = {"file": (os.path.basename(audio_path), f, mime_type)}
-            data = {
-                "model": "whisper-large-v3",
-                "response_format": "verbose_json",
-                "timestamp_granularities[]": "word",
-            }
-            res = requests.post(url, headers=headers, files=files, data=data, timeout=120)
-
-        if res.status_code != 200:
-            safe_print(f"Groq Whisper error ({res.status_code}): {res.text[:200]}")
-            return None
-
-        result = res.json()
-        full_text = result.get("text", "").strip()
         total_duration = _get_audio_duration(audio_path)
 
-        # Extract word-level timestamps
-        word_timestamps = []
-        for w in result.get("words", []):
-            word = w.get("word", "").strip()
-            if word:
-                word_timestamps.append({
-                    "word":  word,
-                    "start": round(float(w.get("start", 0)), 3),
-                    "end":   round(float(w.get("end", 0)), 3),
-                })
+        # Split into 100-second chunks if audio is long
+        if total_duration > 110:
+            safe_print(f"Audio is {total_duration:.0f}s — splitting into chunks for Groq...")
+            chunks = _split_audio_chunks(audio_path, chunk_sec=100)
+        else:
+            chunks = [(audio_path, 0.0)]
 
-        if full_text and not word_timestamps:
-            safe_print("Groq Whisper: no word timestamps — using linear interpolation.")
-            word_timestamps = _linear_timestamps(full_text, total_duration)
+        all_text_parts = []
+        for chunk_path, t_offset in chunks:
+            text = _transcribe_chunk_groq(chunk_path, api_key)
+            if text:
+                all_text_parts.append(text)
+            # Clean up temp chunk files
+            if chunk_path != audio_path:
+                try:
+                    os.remove(chunk_path)
+                except Exception:
+                    pass
 
+        full_text = " ".join(all_text_parts).strip()
+        if not full_text:
+            safe_print("Groq Whisper: no text returned.")
+            return None
+
+        # Use linear interpolation for timestamps (Groq simple JSON has no word times)
+        word_timestamps = _linear_timestamps(full_text, total_duration)
         safe_print(f"✅ Groq Whisper: {len(word_timestamps)} words | {total_duration:.1f}s")
         return {
             "full_text":       full_text,
