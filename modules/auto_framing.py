@@ -14,14 +14,20 @@ import numpy as np
 
 # ── LOAD CLASSIFIERS ONCE ──────────────────────────────────────────────────
 def _load_cascade(name):
-    path = cv2.data.haarcascades + name
-    c = cv2.CascadeClassifier(path)
-    if c.empty():
+    try:
+        if not hasattr(cv2, 'data') or not hasattr(cv2.data, 'haarcascades'):
+            return None
+        path = cv2.data.haarcascades + name
+        c = cv2.CascadeClassifier(path)
+        if c.empty():
+            return None
+        return c
+    except Exception:
         return None
-    return c
 
 _FACE_CASCADE = _load_cascade("haarcascade_frontalface_default.xml")
 _BODY_CASCADE = _load_cascade("haarcascade_upperbody.xml")
+
 
 
 def _detect_subject_bbox(gray_frame):
