@@ -11,3 +11,4 @@ diskcache
 numpy
 aiohttp
 aiofiles
+openai-whisper
