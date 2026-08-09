@@ -4,6 +4,7 @@ __pycache__/
 *.pyc
 output/
 temp/
+cache/
 *.mp4
 *.wav
 *.mp3
