@@ -135,16 +135,23 @@ class ProgressTracker:
 
     def _render_scene_table(self, scene_states):
         with self.tracker_ph.container():
-            st.markdown("### 📊 Scene-by-Scene Progress")
+            st.markdown("### 📊 Phase 1 Scene Breakdown & Kinetic Data Callout Dashboard")
             for s in scene_states:
                 icon     = s["overall"].split()[0] if s["overall"] else "⏳"
                 is_open  = any(
                     kw in s["overall"]
                     for kw in ("In Progress", "Generating", "Downloading")
                 )
+
+                start_sec = s.get("start_sec", 0.0)
+                end_sec = s.get("end_sec", 3.5)
+                dur = max(0.5, end_sec - start_sec)
+                time_str = f"({start_sec:.1f}s – {end_sec:.1f}s, {dur:.1f}s)"
+
+                title_str = s.get("chapter_title") or f"PART {s['index']} OVERVIEW"
+
                 header = (
-                    f"{icon} Scene {s['index']}: "
-                    f"\"{s['narration'][:55]}...\" — {s['overall']}"
+                    f"{icon} Scene {s['index']} {time_str} | 📌 {title_str} — {s['overall']}"
                 )
                 with st.expander(header, expanded=is_open):
                     c_thumb, c_details = st.columns([1, 3])
@@ -158,7 +165,14 @@ class ProgressTracker:
                         ca.write(f"🎙️ **Audio**  \n{s['audio_status']}")
                         cb.write(f"🎥 **Video**  \n{s['video_status']}")
                         cc.write(f"🎨 **VFX**    \n{s['vfx_status']}")
-                        st.caption(f"🔍 Stock query: `{s['query']}`")
+
+                        st.write(f"📜 **Narration:** *\"{s['narration']}\"*")
+                        st.caption(f"🔍 **Stock query:** `{s['query']}`")
+
+                        fc = s.get("fact_card")
+                        if fc and isinstance(fc, dict):
+                            st.info(f"📊 **Kinetic Data Callout (Peak {fc.get('peak_time', 'midway')}):** `{fc.get('label', 'STAT')}: {fc.get('value', '')}`")
+
                         if s.get("word_ts"):
-                            st.caption(f"⚡ **Sync:** {len(s['word_ts'])} words aligned")
+                            st.caption(f"⚡ **Word Sync:** {len(s['word_ts'])} timestamps aligned")
 

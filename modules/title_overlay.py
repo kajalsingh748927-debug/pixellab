@@ -76,8 +76,11 @@ def apply_intro_overlay(frame: np.ndarray, t: float, intro_data: dict, config: d
         sub_w, sub_h = measure_text_with_spacing(draw, subtitle, font_sub, 2) if (show_subtitle and subtitle) else (0, 0)
 
         center_x = w // 2
-        center_y = h // 2
-        title_y = center_y - (title_h // 2)
+        pos_mode = config.get("intro_position", "Center")
+        custom_y = config.get("intro_custom_y_pct", 50)
+        POS_MAP = {"Top": 25, "Center": 50, "Bottom": 75, "Custom": custom_y}
+        target_pct = POS_MAP.get(pos_mode, custom_y)
+        title_y = int(h * (target_pct / 100.0)) - (title_h // 2)
 
         # Entrance progress ratio (0 to 1 over first 0.6s)
         p = min(max(t / max(duration, 0.1), 0.0), 1.0)

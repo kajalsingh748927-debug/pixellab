@@ -307,22 +307,18 @@ def analyze_transcript(scenes: list, api_key: str, tone: str = "Cinematic & Epic
         f"CONCISE QUERY RULE: Every 'search_query' MUST be 3 to 5 core visual Noun + Verb keywords (e.g. 'ai text prompts code generation' or 'robot monitor screen emerging'). "
         f"STRICTLY PROHIBITED: NEVER output sentence fragments like 'for decades artificial', 'but a massive', 'steps out of', or 'physical world through'. NEVER use '4K', 'HD', 'footage', 'video of'. "
         f"EXPECTED VISUAL RULE: Generate 'expected_visual': a short, literal description of ideal shot for visual verification. "
-        f"CRITICAL: Generate 'search_query', 'alt_queries', and 'expected_visual' in 100% PLAIN ENGLISH ONLY. "
-        f"ALSO generate 'english_subtitle': clean 100% English translation of the narration for kinetic subtitles. "
-        f"ALSO generate 'emphasis_words': key impact words for spring-zoom. "
-        f"ALSO generate optional 'map_location' and 'fact_card'. "
-        f"ALSO generate per-scene 'chapter_title' (short 2-4 word uppercase title) and 'show_chapter' (boolean true if scene represents a major topic transition). "
-        f"ALSO generate top-level 'intro' object (keys: 'title', 'subtitle') and 'outro' object (keys: 'thanks_text', 'cta_text'). "
+        f"CRITICAL 3-4 WORD TITLE RULE: 'intro.title' and 'chapter_title' MUST be EXACTLY 3 TO 4 WORDS ONLY in ALL CAPS (e.g. 'EMBODIED AI REVOLUTION' or 'ARTIFICIAL INTELLIGENCE ERA'). "
+        f"KINETIC DATA CALLOUT RULE: Extract optional 'fact_card' object for key numbers/facts/stats in narration (keys: 'label' in ALL CAPS like 'DATA ACCURACY', 'value' like '99.8%', and 'peak_time' timestamp). "
         f"For each scene return: "
         f"1. 'english_subtitle': Clean English translation. "
         f"2. 'expected_visual': Literal description of ideal shot. "
         f"3. 'search_query': Primary ENGLISH ONLY visual search query anchored to '{brief.get('topic')}'. "
         f"4. 'alt_queries': List of 2 backup search terms. "
         f"5. 'emphasis_words': Key impact numbers/words. "
-        f"6. 'chapter_title': Short uppercase section title. "
+        f"6. 'chapter_title': EXACTLY 3-4 WORDS UPPERCASE section title. "
         f"7. 'show_chapter': boolean true/false. "
         f"8. 'map_location': Optional location or null. "
-        f"9. 'fact_card': Optional fact object or null. "
+        f"9. 'fact_card': Optional object with 'label', 'value', 'peak_time' or null. "
         f"Return ONLY a JSON object with 'intro', 'outro', and 'scenes' array of {scene_count} objects."
     )
 
@@ -332,11 +328,22 @@ def analyze_transcript(scenes: list, api_key: str, tone: str = "Cinematic & Epic
         llm_scenes = parsed.get("scenes", [])
 
         # Store intro / outro in brief / scene meta if present
-        brief["intro"] = parsed.get("intro", {"title": topic.upper(), "subtitle": "DOCUMENTARY SHORT"})
+        raw_intro_title = parsed.get("intro", {}).get("title", "")
+        intro_words = [w for w in raw_intro_title.split() if w]
+        clean_intro_title = " ".join(intro_words[:4]).upper() if intro_words else (topic.upper() + " REVOLUTION")[:30]
+
+        brief["intro"] = {
+            "title": clean_intro_title,
+            "subtitle": parsed.get("intro", {}).get("subtitle", "DOCUMENTARY SHORT")
+        }
         brief["outro"] = parsed.get("outro", {"thanks_text": "THANKS FOR WATCHING", "cta_text": "LIKE & SUBSCRIBE FOR MORE"})
 
         for i, sc in enumerate(scenes):
             narration_txt = sc.get("narration", "")
+            start_sec = sc.get("start_sec", i * 3.5)
+            end_sec = sc.get("end_sec", (i + 1) * 3.5)
+            mid_t = round((start_sec + end_sec) / 2.0, 1)
+
             smart_fallback = extract_visual_keywords(narration_txt, topic=topic)
 
             if i < len(llm_scenes):
@@ -345,6 +352,9 @@ def analyze_transcript(scenes: list, api_key: str, tone: str = "Cinematic & Epic
                 raw_eng_sub = llm_scenes[i].get("english_subtitle", "").strip()
                 raw_vis = llm_scenes[i].get("expected_visual", "").strip()
                 raw_emph = llm_scenes[i].get("emphasis_words", [])
+                raw_chap = llm_scenes[i].get("chapter_title", f"CHAPTER {i+1} OVERVIEW")
+                chap_words = [w for w in str(raw_chap).split() if w]
+                clean_chap = " ".join(chap_words[:4]).upper() if chap_words else f"CHAPTER {i+1} OVERVIEW"
 
                 clean_q = clean_stock_query(raw_q)
                 if not clean_q or any(clean_q.startswith(frag) for frag in ["for decades", "but a", "steps out", "physical world"]):
@@ -355,8 +365,26 @@ def analyze_transcript(scenes: list, api_key: str, tone: str = "Cinematic & Epic
                 sc["expected_visual"] = raw_vis or f"Visual shot of {sc['search_query']}"
                 sc["english_subtitle"] = raw_eng_sub or narration_txt
                 sc["emphasis_words"] = [str(w).upper().strip() for w in raw_emph if w]
-                sc["chapter_title"] = str(llm_scenes[i].get("chapter_title", f"PART {i+1}")).upper().strip()
+                sc["chapter_title"] = clean_chap
                 sc["show_chapter"] = bool(llm_scenes[i].get("show_chapter", i == 0))
+
+                fc = llm_scenes[i].get("fact_card")
+                if fc and isinstance(fc, dict) and fc.get("label") and fc.get("value"):
+                    sc["fact_card"] = {
+                        "label": str(fc.get("label")).upper().strip(),
+                        "value": str(fc.get("value")).strip(),
+                        "peak_time": fc.get("peak_time", f"{mid_t:.1f}s")
+                    }
+                else:
+                    # Fallback auto-extract numbers from narration for kinetic data callouts
+                    import re
+                    nums = re.findall(r'\b\d+(?:[\.,]\d+)?%?\b', narration_txt)
+                    if nums:
+                        sc["fact_card"] = {
+                            "label": "KEY STATISTIC",
+                            "value": nums[0],
+                            "peak_time": f"{mid_t:.1f}s"
+                        }
             else:
                 sc["search_query"] = smart_fallback
                 sc["alt_queries"]  = [clean_stock_query(topic + " landscape")]
@@ -364,14 +392,14 @@ def analyze_transcript(scenes: list, api_key: str, tone: str = "Cinematic & Epic
                 sc["english_subtitle"] = narration_txt
                 words = narration_txt.split()
                 sc["emphasis_words"]   = [w.upper() for w in words if any(c.isdigit() for c in w)]
-                sc["chapter_title"] = f"SCENE {i+1}"
+                sc["chapter_title"] = f"PART {i+1} OVERVIEW"
                 sc["show_chapter"] = (i == 0)
 
         if scenes:
-            scenes[0]["intro"] = brief.get("intro", {"title": (topic or "PIXELAB").upper(), "subtitle": "AI VIDEO GENERATOR"})
+            scenes[0]["intro"] = brief.get("intro", {"title": (topic.upper() + " REVOLUTION")[:25], "subtitle": "AI VIDEO GENERATOR"})
             scenes[-1]["outro"] = brief.get("outro", {"thanks_text": "THANKS FOR WATCHING", "cta_text": "LIKE & SUBSCRIBE FOR MORE"})
 
-        safe_print(f"AI Director: queries, expected visuals, chapter titles, intro & outro generated for {len(scenes)} scenes.")
+        safe_print(f"AI Director: 3-4 word titles, peak-time data callouts, intro & outro generated for {len(scenes)} scenes.")
         return scenes
 
     except Exception as e:

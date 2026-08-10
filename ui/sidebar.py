@@ -303,6 +303,13 @@ def render_sidebar() -> dict:
         with st.expander("🎬 Intro Title Card", expanded=False):
             show_intro = st.checkbox("Enable Intro Card", value=True)
             intro_duration = st.slider("Intro Duration (sec)", 2.0, 6.0, 4.0, 0.5)
+            intro_position = st.selectbox(
+                "Screen Position",
+                ["Top", "Center", "Bottom", "Custom"],
+                index=1
+            )
+            intro_custom_y_pct = st.slider("Custom Y% (0=Top, 100=Bottom)", 0, 100, 50, 1)
+            intro_title_size_scale = st.slider("Title Font Scale", 0.5, 2.5, 1.0, 0.1)
             intro_style_override = st.selectbox(
                 "Animation Style",
                 ["AI Auto-Pick", "Particle Assemble", "Glow Reveal", "Cinematic Scale", "Typewriter"],
@@ -449,6 +456,9 @@ def render_sidebar() -> dict:
         # Intro Card Settings
         "show_intro": show_intro,
         "intro_duration": intro_duration,
+        "intro_position": intro_position,
+        "intro_custom_y_pct": intro_custom_y_pct,
+        "intro_title_size_scale": intro_title_size_scale,
         "intro_style_override": None if intro_style_override == "AI Auto-Pick" else intro_style_override.lower().replace(" ", "_"),
         "intro_bg_style": intro_bg_style.lower().replace(" ", "_"),
         "intro_title_color": hex_to_rgb_tuple(intro_title_color),
