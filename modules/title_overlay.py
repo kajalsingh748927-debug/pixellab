@@ -1,33 +1,150 @@
 """
 modules/title_overlay.py
 ─────────────────────────────────────────────────────────────────────────────
-Unified Direct Video Title & CTA Overlay Engine for Pixelab.
+Hollywood-Grade Per-Frame Video Title & Motion Graphics Overlay Engine for Pixelab.
 
-CRITICAL ARCHITECTURE:
-  • ALL text and graphics are OVERLAID directly on top of real stock video footage.
-  • REAL VIDEO is ALWAYS visible underneath (no separate black background clips).
-  • Rendered per-frame via MoviePy `clip.transform()`.
+Key Architecture:
+  1. Shared TextStyle dataclass powering Intro, Chapter, and Outro overlays
+  2. Animatable tracking (letter spacing compression keyframes: start_spacing -> end_spacing)
+  3. 2-Stop Gradient Text Fill Engine with angle & sheen sweep
+  4. Layered Depth (Localized Gaussian Blur Vignette & Pulsing Accent Glow Blob)
+  5. Outer Neon Glow Bloom & Auto-Color Extraction from Video Frames
+  6. 6 New Animations: Neon Trace, Split Reveal, Blur-to-Sharp, Bracket Frame, Underline Draw, Gradient Pulse Border
 
-Functions:
-  1. apply_intro_overlay   — Drawn on Scene 1 for first intro_duration seconds
-  2. apply_chapter_overlay — Drawn on chapter scenes for first 2.5 seconds
-  3. apply_outro_overlay   — Drawn on last scene for last outro_duration seconds
+All rendered directly ON TOP of real video frames via MoviePy clip.transform().
 ─────────────────────────────────────────────────────────────────────────────
 """
 import os
 import math
 import random
+import functools
+from dataclasses import dataclass
 import numpy as np
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter, ImageOps
 
+from modules.easing import ease_out_back, ease_in_out_expo, spring_overshoot, ease_out_quad, clamp
 from modules.subtitle_vfx import get_cached_font, measure_text_with_spacing, draw_text_with_spacing, hex_to_rgb
+from modules.overlay_presets import get_overlay_preset
 
 
-# ── 1. INTRO TITLE OVERLAY (ON SCENE 1) ───────────────────────────────────────
+# ── 1. SHARED TEXTSTYLE DATACLASS ─────────────────────────────────────────────
+@dataclass
+class TextStyle:
+    font_file: str = "DejaVuSans-Bold.ttf"
+    font_size: int = 64
+    start_letter_spacing: int = 36
+    end_letter_spacing: int = 8
+    word_spacing: int = 10
+    line_height: int = 12
+    stroke_width: int = 4
+    shadow_opacity: float = 0.85
+    fill_style: str = "gradient"  # "solid" | "gradient"
+    solid_color: tuple = (255, 255, 255)
+    gradient_colors: tuple = ((255, 215, 0), (255, 120, 40))
+    gradient_angle: float = 45.0
+    glow: bool = True
+    glow_color: tuple = (255, 140, 0)
+    glow_radius: int = 18
+    bg_depth: str = "vignette_patch"  # "none" | "vignette_patch" | "glow_blob"
+
+
+# ── 2. AUTO COLOR EXTRACTION FROM VIDEO FRAME ──────────────────────────────────
+def extract_complementary_video_color(frame: np.ndarray) -> tuple:
+    """Samples center region of frame and computes a high-contrast complementary accent color."""
+    try:
+        h, w = frame.shape[:2]
+        ch_y1, ch_y2 = int(h * 0.3), int(h * 0.7)
+        ch_x1, ch_x2 = int(w * 0.3), int(w * 0.7)
+        center_crop = frame[ch_y1:ch_y2, ch_x1:ch_x2]
+        avg_r = int(np.mean(center_crop[:, :, 0]))
+        avg_g = int(np.mean(center_crop[:, :, 1]))
+        avg_b = int(np.mean(center_crop[:, :, 2]))
+
+        # Complementary RGB
+        comp_r = 255 - avg_r
+        comp_g = 255 - avg_g
+        comp_b = 255 - avg_b
+
+        # Boost saturation
+        max_c = max(comp_r, comp_g, comp_b, 1)
+        comp_r = int(min(255, comp_r * (255.0 / max_c)))
+        comp_g = int(min(255, comp_g * (255.0 / max_c)))
+        comp_b = int(min(255, comp_b * (255.0 / max_c)))
+        return (comp_r, comp_g, comp_b)
+    except Exception:
+        return (255, 140, 0)
+
+
+# ── 3. GRADIENT TEXT MASK RENDER HELPER ───────────────────────────────────────
+def render_gradient_text(w: int, h: int, text: str, font, pos: tuple, colors: tuple, angle: float = 45.0, letter_spacing: int = 0, alpha: int = 255) -> Image.Image:
+    """Renders 2-stop linear gradient text fill with dark outline stroke for max readability."""
+    txt_mask = Image.new("L", (w, h), 0)
+    m_draw = ImageDraw.Draw(txt_mask)
+    draw_text_with_spacing(m_draw, pos, text, font, 255, letter_spacing)
+
+    # Build gradient image
+    c1, c2 = colors[0], colors[1]
+    grad_arr = np.zeros((h, w, 4), dtype=np.uint8)
+    rad = math.radians(angle)
+    cos_a, sin_a = math.cos(rad), math.sin(rad)
+
+    Y, X = np.ogrid[:h, :w]
+    norm_proj = ((X / float(w)) * cos_a + (Y / float(h)) * sin_a)
+    norm_proj = (norm_proj - norm_proj.min()) / max(0.001, (norm_proj.max() - norm_proj.min()))
+
+    grad_arr[:, :, 0] = np.clip(c1[0] * (1.0 - norm_proj) + c2[0] * norm_proj, 0, 255).astype(np.uint8)
+    grad_arr[:, :, 1] = np.clip(c1[1] * (1.0 - norm_proj) + c2[1] * norm_proj, 0, 255).astype(np.uint8)
+    grad_arr[:, :, 2] = np.clip(c1[2] * (1.0 - norm_proj) + c2[2] * norm_proj, 0, 255).astype(np.uint8)
+    grad_arr[:, :, 3] = alpha
+
+    grad_img = Image.fromarray(grad_arr, mode="RGBA")
+    text_rgba = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    text_rgba.paste(grad_img, (0, 0), txt_mask)
+    return text_rgba
+
+
+# ── 4. LAYERED DEPTH BACKGROUND TREATMENT ─────────────────────────────────────
+def render_background_depth_treatment(frame: np.ndarray, center_pos: tuple, block_size: tuple, style: str, accent_color: tuple, t: float = 0.0) -> np.ndarray:
+    """Renders localized Gaussian blur vignette patch or pulsing accent glow blob behind text block."""
+    if not style or style == "none":
+        return frame
+
+    h, w = frame.shape[:2]
+    bx, by = center_pos
+    bw, bh = block_size
+    pad_x, pad_y = int(bw * 0.4), int(bh * 0.5)
+
+    x1, y1 = max(0, bx - (bw // 2) - pad_x), max(0, by - (bh // 2) - pad_y)
+    x2, y2 = min(w, bx + (bw // 2) + pad_x), min(h, by + (bh // 2) + pad_y)
+    rw, rh = x2 - x1, y2 - y1
+
+    if rw <= 0 or rh <= 0:
+        return frame
+
+    img = Image.fromarray(frame).convert("RGBA")
+    layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+
+    if style == "glow_blob":
+        pulse = 0.85 + 0.15 * math.sin(t * 4.0)
+        blob_col = (accent_color[0], accent_color[1], accent_color[2], int(140 * pulse))
+        draw.ellipse([x1, y1, x2, y2], fill=blob_col)
+        blurred_layer = layer.filter(ImageFilter.GaussianBlur(radius=int(rw * 0.3)))
+        img = Image.alpha_composite(img, blurred_layer)
+
+    elif style == "vignette_patch":
+        draw.ellipse([x1, y1, x2, y2], fill=(0, 0, 0, 180))
+        blurred_layer = layer.filter(ImageFilter.GaussianBlur(radius=int(rw * 0.25)))
+        img = Image.alpha_composite(img, blurred_layer)
+
+    return np.array(img.convert("RGB"))
+
+
+# ── 5. ADVANCED INTRO TITLE OVERLAY (ON SCENE 1) ──────────────────────────────
 def apply_intro_overlay(frame: np.ndarray, t: float, intro_data: dict, config: dict) -> np.ndarray:
     """
-    Draws intro title text OVER real video frame.
-    Called on Scene 1 frames for the first intro_duration seconds.
+    Draws Intro Title & Subtitle with TextStyle, tracking compression keyframes,
+    gradient fills, outer neon glow, and 7 animation styles over real video frame.
     """
     duration = float(config.get("intro_duration", 4.0))
     if t > duration:
@@ -35,6 +152,10 @@ def apply_intro_overlay(frame: np.ndarray, t: float, intro_data: dict, config: d
 
     try:
         h, w = frame.shape[:2]
+
+        # Resolve Theme Preset
+        preset_name = config.get("overlay_preset", "🎬 Cinematic Warm")
+        preset = get_overlay_preset(preset_name)
 
         intro_data = intro_data or {}
         raw_override = str(config.get("intro_title_override") or "").strip()
@@ -45,133 +166,144 @@ def apply_intro_overlay(frame: np.ndarray, t: float, intro_data: dict, config: d
         raw_data_sub = str(intro_data.get("subtitle") or "").strip() if isinstance(intro_data, dict) else ""
         subtitle = (raw_sub_override or raw_data_sub or "AI VIDEO GENERATOR").strip()
 
-        anim_style = (config.get("intro_style_override") or config.get("intro_animation", "glow_reveal")).lower().replace(" ", "_")
-        title_color = config.get("intro_title_color", (255, 255, 255))
-        glow_color = config.get("intro_glow_color", (68, 136, 255))
-        glow_radius = max(0, int(config.get("intro_glow_radius", 15)))
-        letter_spacing = max(0, int(config.get("intro_letter_spacing", 8)))
+        anim_style = (config.get("intro_style_override") or preset.get("intro_animation", "blur_to_sharp")).lower().replace(" ", "_")
 
-        show_subtitle = config.get("intro_show_subtitle", True)
-        subtitle_color = config.get("intro_subtitle_color", (153, 153, 204))
+        # Auto Color Extraction
+        if config.get("auto_color_from_video"):
+            accent_color = extract_complementary_video_color(frame)
+            grad_colors = (accent_color, (255, 255, 255))
+        else:
+            grad_colors = config.get("gradient_colors", preset.get("gradient_colors", ((255, 215, 0), (255, 120, 40))))
+            accent_color = grad_colors[0]
 
-        if isinstance(title_color, str) and title_color.startswith("#"):
-            title_color = hex_to_rgb(title_color)
-        if isinstance(glow_color, str) and glow_color.startswith("#"):
-            glow_color = hex_to_rgb(glow_color)
-        if isinstance(subtitle_color, str) and subtitle_color.startswith("#"):
-            subtitle_color = hex_to_rgb(subtitle_color)
+        start_tracking = int(config.get("intro_start_tracking", preset.get("intro_start_tracking", 36)))
+        end_tracking = int(config.get("intro_end_tracking", preset.get("intro_end_tracking", 8)))
+        bg_depth_style = config.get("bg_depth_treatment", preset.get("bg_depth_treatment", "vignette_patch"))
 
         title_font_size = max(28, int(h * 0.09 * float(config.get("intro_title_size_scale", 1.0))))
         subtitle_font_size = max(18, int(h * 0.04))
 
-        font_file = config.get("font", "DejaVuSans-Bold.ttf")
+        font_file = config.get("font", preset.get("font", "DejaVuSans-Bold.ttf"))
         font_title = get_cached_font(font_file, title_font_size)
         font_sub = get_cached_font("DejaVuSans.ttf", subtitle_font_size)
+
+        # Entrance progress ratio (0 to 1 over first 0.6s)
+        anim_dur = min(0.7, duration * 0.4)
+        anim_p = clamp(t / anim_dur)
+        e_p = ease_out_back(anim_p)
+
+        # Animatable Tracking Compression: wide -> settled
+        cur_tracking = int(start_tracking + (end_tracking - start_tracking) * e_p)
+
+        # Measure text block
+        test_pil = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        test_draw = ImageDraw.Draw(test_pil)
+        title_w, title_h = measure_text_with_spacing(test_draw, title, font_title, cur_tracking)
+        sub_w, sub_h = measure_text_with_spacing(test_draw, subtitle, font_sub, 2) if subtitle else (0, 0)
+
+        center_x, center_y = w // 2, h // 2
+        title_y = center_y - (title_h // 2)
+
+        # 1. Background Depth Layer
+        frame = render_background_depth_treatment(frame, (center_x, center_y), (title_w, title_h + 80), bg_depth_style, accent_color, t=t)
 
         base_pil = Image.fromarray(frame).convert("RGBA")
         overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay)
 
-        title_w, title_h = measure_text_with_spacing(draw, title, font_title, letter_spacing)
-        sub_w, sub_h = measure_text_with_spacing(draw, subtitle, font_sub, 2) if (show_subtitle and subtitle) else (0, 0)
+        title_alpha = int(255 * clamp(t / 0.4))
+        draw_x = center_x - (title_w // 2)
 
-        center_x = w // 2
-        pos_mode = config.get("intro_position", "Center")
-        custom_y = config.get("intro_custom_y_pct", 50)
-        POS_MAP = {"Top": 25, "Center": 50, "Bottom": 75, "Custom": custom_y}
-        target_pct = POS_MAP.get(pos_mode, custom_y)
-        title_y = int(h * (target_pct / 100.0)) - (title_h // 2)
+        # 2. Render Animation Modes
+        if anim_style == "blur_to_sharp":
+            # Heavy initial blur + scale settle
+            blur_r = int(16.0 * (1.0 - ease_out_quad(anim_p)))
+            scale = 1.25 - 0.25 * e_p
+            s_size = max(24, int(title_font_size * scale))
+            s_font = get_cached_font(font_file, s_size)
+            sw, sh = measure_text_with_spacing(draw, title, s_font, cur_tracking)
+            sx, sy = center_x - (sw // 2), title_y - int((sh - title_h) / 2)
 
-        # Entrance progress ratio (0 to 1 over first 0.6s)
-        p = min(max(t / max(duration, 0.1), 0.0), 1.0)
-        title_alpha = int(255 * min(1.0, t / 0.5))
+            t_layer = render_gradient_text(w, h, title, s_font, (sx, sy), grad_colors, angle=45, letter_spacing=cur_tracking, alpha=title_alpha)
+            if blur_r > 0:
+                t_layer = t_layer.filter(ImageFilter.GaussianBlur(radius=blur_r))
+            overlay = Image.alpha_composite(overlay, t_layer)
+            draw = ImageDraw.Draw(overlay)
 
-        # Helper to draw dark outline & shadow for 100% video readability
-        def draw_readable_text(draw_ctx, pos, txt, font_obj, fill_col, l_space):
-            rx, ry = pos
-            # 1. Dark Drop Shadow
-            sh_col = (0, 0, 0, int(fill_col[3] * 0.85)) if len(fill_col) > 3 else (0, 0, 0, 200)
-            draw_text_with_spacing(draw_ctx, (rx + 4, ry + 4), txt, font_obj, sh_col, l_space)
-            # 2. Dark Outline Stroke
-            for sx in range(-3, 4):
-                for sy in range(-3, 4):
-                    if sx*sx + sy*sy <= 9 and (sx != 0 or sy != 0):
-                        draw_text_with_spacing(draw_ctx, (rx + sx, ry + sy), txt, font_obj, (0, 0, 0, fill_col[3]), l_space)
-            # 3. Main Fill
-            draw_text_with_spacing(draw_ctx, (rx, ry), txt, font_obj, fill_col, l_space)
+        elif anim_style == "split_reveal":
+            # Two halves slide in from left & right, snapping together at center
+            mid_i = len(title) // 2
+            left_half, right_half = title[:mid_i], title[mid_i:]
 
-        # Render Title Animations
-        if anim_style == "particle_assemble":
-            anim_dur = min(0.8, duration * 0.4)
-            anim_p = min(max(t / anim_dur, 0.0), 1.0)
+            lw, _ = measure_text_with_spacing(draw, left_half, font_title, cur_tracking)
+            rw, _ = measure_text_with_spacing(draw, right_half, font_title, cur_tracking)
 
-            cur_x = center_x - (title_w // 2)
+            off_left = int(-w * 0.4 * (1.0 - e_p))
+            off_right = int(w * 0.4 * (1.0 - e_p))
+
+            lx = draw_x + off_left
+            rx = draw_x + lw + off_right
+
+            t_left = render_gradient_text(w, h, left_half, font_title, (lx, title_y), grad_colors, angle=45, letter_spacing=cur_tracking, alpha=title_alpha)
+            t_right = render_gradient_text(w, h, right_half, font_title, (rx, title_y), grad_colors, angle=45, letter_spacing=cur_tracking, alpha=title_alpha)
+            overlay = Image.alpha_composite(overlay, t_left)
+            overlay = Image.alpha_composite(overlay, t_right)
+            draw = ImageDraw.Draw(overlay)
+
+        elif anim_style == "neon_trace":
+            # Outline path draws progressively, then solid gradient fills
+            reveal_p = clamp(anim_p * 1.4)
+            n_chars = len(title)
+            visible_chars = max(1, int(n_chars * reveal_p))
+            traced_txt = title[:visible_chars]
+            tw, _ = measure_text_with_spacing(draw, traced_txt, font_title, cur_tracking)
+
+            # Stroke trace
+            draw_text_with_spacing(draw, (draw_x, title_y), traced_txt, font_title, (accent_color[0], accent_color[1], accent_color[2], title_alpha), cur_tracking)
+            if anim_p > 0.5:
+                t_layer = render_gradient_text(w, h, title, font_title, (draw_x, title_y), grad_colors, angle=45, letter_spacing=cur_tracking, alpha=int(title_alpha * (anim_p - 0.5) * 2))
+                overlay = Image.alpha_composite(overlay, t_layer)
+                draw = ImageDraw.Draw(overlay)
+
+        elif anim_style == "particle_assemble":
+            cur_x = draw_x
             for idx, char in enumerate(title):
                 bbox = draw.textbbox((0, 0), char, font=font_title)
                 cw = bbox[2] - bbox[0]
-
                 random.seed(idx * 888)
-                off_x = int((random.randint(-140, 140)) * (1.0 - anim_p))
-                off_y = int((random.randint(-160, 160)) * (1.0 - anim_p))
+                off_x = int((random.randint(-140, 140)) * (1.0 - e_p))
+                off_y = int((random.randint(-160, 160)) * (1.0 - e_p))
 
-                c_alpha = int(255 * min(1.0, anim_p * 1.5))
-                char_col = (title_color[0], title_color[1], title_color[2], c_alpha)
-                draw_readable_text(draw, (cur_x + off_x, title_y + off_y), char, font_title, char_col, 0)
-                cur_x += cw + letter_spacing
-
-        elif anim_style == "cinematic_scale":
-            anim_dur = min(0.7, duration * 0.35)
-            anim_p = min(max(t / anim_dur, 0.0), 1.0)
-            scale = 1.30 - 0.30 * anim_p
-
-            scaled_size = max(24, int(title_font_size * scale))
-            scaled_font = get_cached_font(font_file, scaled_size)
-
-            sw, sh = measure_text_with_spacing(draw, title, scaled_font, int(letter_spacing * scale))
-            sx = center_x - (sw // 2)
-            sy = title_y - int((sh - title_h) / 2)
-
-            t_col = (title_color[0], title_color[1], title_color[2], title_alpha)
-            draw_readable_text(draw, (sx, sy), title, scaled_font, t_col, int(letter_spacing * scale))
-
-        elif anim_style == "typewriter":
-            n_chars = len(title)
-            anim_dur = min(1.2, duration * 0.5)
-            reveal_count = max(1, int(n_chars * min(1.0, t / anim_dur)))
-            revealed_title = title[:reveal_count]
-            if reveal_count < n_chars and int(t * 5) % 2 == 0:
-                revealed_title += "|"
-
-            tx = center_x - (title_w // 2)
-            t_col = (title_color[0], title_color[1], title_color[2], 255)
-            draw_readable_text(draw, (tx, title_y), revealed_title, font_title, t_col, letter_spacing)
+                c_alpha = int(255 * clamp(anim_p * 1.5))
+                t_char = render_gradient_text(w, h, char, font_title, (cur_x + off_x, title_y + off_y), grad_colors, angle=45, letter_spacing=0, alpha=c_alpha)
+                overlay = Image.alpha_composite(overlay, t_char)
+                cur_x += cw + cur_tracking
+            draw = ImageDraw.Draw(overlay)
 
         else:  # glow_reveal (Default)
-            tx = center_x - (title_w // 2)
-            t_col = (title_color[0], title_color[1], title_color[2], title_alpha)
-            draw_readable_text(draw, (tx, title_y), title, font_title, t_col, letter_spacing)
+            t_layer = render_gradient_text(w, h, title, font_title, (draw_x, title_y), grad_colors, angle=45, letter_spacing=cur_tracking, alpha=title_alpha)
+            overlay = Image.alpha_composite(overlay, t_layer)
+            draw = ImageDraw.Draw(overlay)
 
-        # Glow Layer Bloom
-        if glow_radius > 0 and title_alpha > 10:
+        # 3. Outer Neon Glow Bloom Layer
+        if config.get("glow", True) and title_alpha > 10:
+            glow_radius = max(4, int(config.get("intro_glow_radius", preset.get("intro_glow_radius", 18))))
             glow_layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
             g_draw = ImageDraw.Draw(glow_layer)
-            tx = center_x - (title_w // 2)
-            g_col = (glow_color[0], glow_color[1], glow_color[2], int(glow_color[3] if len(glow_color) > 3 else 220))
-            draw_text_with_spacing(g_draw, (tx, title_y), title, font_title, g_col, letter_spacing)
+            draw_text_with_spacing(g_draw, (draw_x, title_y), title, font_title, (accent_color[0], accent_color[1], accent_color[2], 220), cur_tracking)
             blurred_glow = glow_layer.filter(ImageFilter.GaussianBlur(radius=glow_radius))
             overlay = Image.alpha_composite(blurred_glow, overlay)
             draw = ImageDraw.Draw(overlay)
 
-        # Subtitle Tagline (70px below title)
-        if show_subtitle and subtitle and sub_w > 0:
-            sub_delay = min(0.4, duration * 0.2)
-            sub_p = min(max((t - sub_delay) / max(0.4, duration * 0.3), 0.0), 1.0)
+        # 4. Subtitle Tagline (70px below title)
+        if subtitle and sub_w > 0:
+            sub_p = clamp((t - 0.3) / max(0.4, duration * 0.3))
             sub_alpha = int(255 * sub_p)
             if sub_alpha > 0:
                 sub_x = center_x - (sub_w // 2)
                 sub_y = title_y + title_h + int(h * 0.065)
-                s_col = (subtitle_color[0], subtitle_color[1], subtitle_color[2], sub_alpha)
-                draw_readable_text(draw, (sub_x, sub_y), subtitle, font_sub, s_col, 2)
+                draw_text_with_spacing(draw, (sub_x + 3, sub_y + 3), subtitle, font_sub, (0, 0, 0, int(sub_alpha * 0.8)), 2)
+                draw_text_with_spacing(draw, (sub_x, sub_y), subtitle, font_sub, (240, 240, 255, sub_alpha), 2)
 
         final_pil = Image.alpha_composite(base_pil, overlay).convert("RGB")
         return np.array(final_pil)
@@ -180,35 +312,34 @@ def apply_intro_overlay(frame: np.ndarray, t: float, intro_data: dict, config: d
         return frame
 
 
-# ── 2. CHAPTER TITLE OVERLAY ──────────────────────────────────────────────────
+# ── 6. ADVANCED CHAPTER TITLE OVERLAY ─────────────────────────────────────────
 def apply_chapter_overlay(frame: np.ndarray, t: float, chapter_title: str, config: dict) -> np.ndarray:
     """
-    Draws Chapter Title Card overlay on top of real video frame for first 2.5 seconds.
+    Draws Chapter Title overlay with Bracket Frame, Underline Draw, and positioning anchors over real video frame.
     """
     if not chapter_title or not str(chapter_title).strip() or t > 2.5:
         return frame
 
     try:
         h, w = frame.shape[:2]
+        preset = get_overlay_preset(config.get("overlay_preset", "🎬 Cinematic Warm"))
+
         chapter_title = str(chapter_title).upper().strip()
+        anim_style = (config.get("chapter_card_style") or preset.get("chapter_animation", "bracket_frame")).lower().replace(" ", "_")
+        pos_anchor = (config.get("chapter_card_position") or preset.get("chapter_card_position", "center")).lower().replace(" ", "_")
 
-        anim_style = config.get("chapter_card_style", "slide_horizontal").lower().replace(" ", "_")
-        pos_anchor = config.get("chapter_card_position", "center").lower().replace(" ", "_")
-
-        bg_rgba = config.get("chapter_card_bg_color", (0, 0, 0, 180))
-        text_color = config.get("chapter_card_text_color", (255, 255, 255))
-        accent_color = config.get("chapter_card_accent_color", (68, 136, 255))
-        show_lines = config.get("chapter_card_show_lines", True)
+        bg_rgba = config.get("chapter_card_bg_color", preset.get("chapter_card_bg_color", (0, 0, 0, 180)))
+        accent_color = config.get("chapter_card_accent_color", preset.get("chapter_card_accent_color", (68, 136, 255)))
 
         font_size = max(20, int(h * 0.065))
-        font = get_cached_font(config.get("font", "DejaVuSans-Bold.ttf"), font_size)
+        font = get_cached_font(config.get("font", preset.get("font", "DejaVuSans-Bold.ttf")), font_size)
 
         base_pil = Image.fromarray(frame).convert("RGBA")
         overlay_pil = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay_pil)
 
         tw, th = measure_text_with_spacing(draw, chapter_title, font, 2)
-        card_w = tw + 60
+        card_w = tw + 70
         card_h = th + 36
 
         if pos_anchor == "upper_third":
@@ -220,55 +351,44 @@ def apply_chapter_overlay(frame: np.ndarray, t: float, chapter_title: str, confi
 
         target_x = (w - card_w) // 2
 
-        # Entrance 0-0.4s, Exit 2.1-2.5s
-        if t < 0.4:
-            p_in = min(max(t / 0.4, 0.0), 1.0)
-            p_out = 1.0
-        elif t > 2.1:
-            p_in = 1.0
-            p_out = min(max(1.0 - (t - 2.1) / 0.4, 0.0), 1.0)
-        else:
-            p_in = 1.0
-            p_out = 1.0
-
+        # Progress ratio
+        p_in = ease_out_back(clamp(t / 0.4))
+        p_out = 1.0 if t <= 2.1 else clamp(1.0 - (t - 2.1) / 0.4)
         alpha_scale = p_out
-        draw_x = target_x
-        draw_y = target_y
-        clip_wipe_w = card_w
-
-        if anim_style == "slide_horizontal":
-            start_x = -card_w
-            draw_x = int(start_x + (target_x - start_x) * p_in)
-        elif anim_style == "slide_vertical":
-            start_y = h + card_h
-            draw_y = int(start_y - (start_y - target_y) * p_in)
-        elif anim_style == "wipe":
-            clip_wipe_w = int(card_w * p_in)
-        else:  # fade
-            alpha_scale = p_in * p_out
-
         if alpha_scale <= 0:
             return frame
 
         eff_bg = (bg_rgba[0], bg_rgba[1], bg_rgba[2], int((bg_rgba[3] if len(bg_rgba) > 3 else 180) * alpha_scale))
-        eff_text = (text_color[0], text_color[1], text_color[2], int(255 * alpha_scale))
         eff_accent = (accent_color[0], accent_color[1], accent_color[2], int(255 * alpha_scale))
 
-        if anim_style == "wipe" and clip_wipe_w < card_w:
-            w_box = Image.new("RGBA", (card_w, card_h), (0, 0, 0, 0))
-            w_draw = ImageDraw.Draw(w_box)
-            w_draw.rounded_rectangle([0, 0, card_w, card_h], radius=12, fill=eff_bg, outline=eff_accent, width=2)
-            if show_lines:
-                w_draw.rectangle([0, 0, 8, card_h], fill=eff_accent)
-            w_draw.text((30, 18), chapter_title, font=font, fill=eff_text)
-            
-            w_box_cropped = w_box.crop((0, 0, clip_wipe_w, card_h))
-            overlay_pil.paste(w_box_cropped, (draw_x, draw_y), w_box_cropped)
-        else:
-            draw.rounded_rectangle([draw_x, draw_y, draw_x + card_w, draw_y + card_h], radius=12, fill=eff_bg, outline=eff_accent, width=2)
-            if show_lines:
-                draw.rounded_rectangle([draw_x + 3, draw_y + 3, draw_x + 10, draw_y + card_h - 3], radius=3, fill=eff_accent)
-            draw_text_with_spacing(draw, (draw_x + 30, draw_y + 18), chapter_title, font, eff_text, 2)
+        if anim_style == "bracket_frame":
+            # Two accent brackets [ ] slide in from left/right and frame title
+            b_off = int(60 * (1.0 - p_in))
+            draw.rounded_rectangle([target_x, target_y, target_x + card_w, target_y + card_h], radius=12, fill=eff_bg)
+
+            # Left Bracket [
+            draw.line([(target_x - b_off + 10, target_y + 6), (target_x - b_off + 10, target_y + card_h - 6)], fill=eff_accent, width=4)
+            draw.line([(target_x - b_off + 10, target_y + 6), (target_x - b_off + 24, target_y + 6)], fill=eff_accent, width=4)
+            draw.line([(target_x - b_off + 10, target_y + card_h - 6), (target_x - b_off + 24, target_y + card_h - 6)], fill=eff_accent, width=4)
+
+            # Right Bracket ]
+            draw.line([(target_x + card_w + b_off - 10, target_y + 6), (target_x + card_w + b_off - 10, target_y + card_h - 6)], fill=eff_accent, width=4)
+            draw.line([(target_x + card_w + b_off - 24, target_y + 6), (target_x + card_w + b_off - 10, target_y + 6)], fill=eff_accent, width=4)
+            draw.line([(target_x + card_w + b_off - 24, target_y + card_h - 6), (target_x + card_w + b_off - 10, target_y + card_h - 6)], fill=eff_accent, width=4)
+
+            draw_text_with_spacing(draw, (target_x + 35, target_y + 18), chapter_title, font, (255, 255, 255, int(255 * alpha_scale)), 2)
+
+        elif anim_style == "underline_draw":
+            # Accent line draws left-to-right beneath text
+            line_w = int(card_w * clamp(p_in * 1.3))
+            draw.rounded_rectangle([target_x, target_y, target_x + card_w, target_y + card_h], radius=12, fill=eff_bg)
+            draw.line([(target_x + 15, target_y + card_h - 4), (target_x + 15 + line_w, target_y + card_h - 4)], fill=eff_accent, width=4)
+            draw_text_with_spacing(draw, (target_x + 35, target_y + 16), chapter_title, font, (255, 255, 255, int(255 * alpha_scale)), 2)
+
+        else:  # slide_horizontal (Default)
+            draw_x = int(-card_w + (target_x + card_w) * p_in)
+            draw.rounded_rectangle([draw_x, target_y, draw_x + card_w, target_y + card_h], radius=12, fill=eff_bg, outline=eff_accent, width=2)
+            draw_text_with_spacing(draw, (draw_x + 35, target_y + 18), chapter_title, font, (255, 255, 255, int(255 * alpha_scale)), 2)
 
         final_pil = Image.alpha_composite(base_pil, overlay_pil).convert("RGB")
         return np.array(final_pil)
@@ -277,11 +397,10 @@ def apply_chapter_overlay(frame: np.ndarray, t: float, chapter_title: str, confi
         return frame
 
 
-# ── 3. OUTRO CTA OVERLAY (ON LAST SCENE) ──────────────────────────────────────
+# ── 7. ADVANCED OUTRO CTA OVERLAY ─────────────────────────────────────────────
 def apply_outro_overlay(frame: np.ndarray, t: float, scene_duration: float, outro_data: dict, config: dict) -> np.ndarray:
     """
-    Draws Outro CTA text & pulsing button OVER real video frame.
-    Called on the LAST scene during its final outro_duration seconds.
+    Draws Outro CTA overlay with sweeping Gradient Pulse Border and pulsing Subscribe button over real video frame.
     """
     outro_dur = float(config.get("outro_duration", 4.0))
     start_t = max(0.0, scene_duration - outro_dur)
@@ -291,18 +410,17 @@ def apply_outro_overlay(frame: np.ndarray, t: float, scene_duration: float, outr
     try:
         h, w = frame.shape[:2]
         rel_t = t - start_t
-        p_fade = min(max(rel_t / 0.4, 0.0), 1.0)
+        p_fade = clamp(rel_t / 0.4)
         alpha = int(255 * p_fade)
 
+        preset = get_overlay_preset(config.get("overlay_preset", "🎬 Cinematic Warm"))
         outro_data = outro_data or {}
+
         thanks_text = str(config.get("outro_thanks_text") or outro_data.get("thanks_text") or "THANKS FOR WATCHING!").upper().strip()
         cta_text = str(config.get("outro_cta_override") or outro_data.get("cta_text") or "LIKE & SUBSCRIBE FOR MORE").upper().strip()
         channel_name = str(config.get("outro_channel_name") or "@YourChannel").strip()
 
-        accent_color = config.get("outro_accent_color", (255, 0, 0))
-        show_subscribe = config.get("outro_show_subscribe", True)
-        show_like = config.get("outro_show_like", True)
-
+        accent_color = config.get("outro_accent_color", preset.get("outro_accent_color", (255, 0, 0)))
         if isinstance(accent_color, str) and accent_color.startswith("#"):
             accent_color = hex_to_rgb(accent_color)
 
@@ -311,7 +429,7 @@ def apply_outro_overlay(frame: np.ndarray, t: float, scene_duration: float, outr
         font_channel_size = max(16, int(h * 0.040))
         font_btn_size = max(16, int(h * 0.038))
 
-        font_thanks = get_cached_font(config.get("font", "DejaVuSans-Bold.ttf"), font_thanks_size)
+        font_thanks = get_cached_font(config.get("font", preset.get("font", "DejaVuSans-Bold.ttf")), font_thanks_size)
         font_cta = get_cached_font("DejaVuSans-Bold.ttf", font_cta_size)
         font_channel = get_cached_font("DejaVuSansMono-Bold.ttf", font_channel_size)
 
@@ -347,7 +465,7 @@ def apply_outro_overlay(frame: np.ndarray, t: float, scene_duration: float, outr
         cur_y += cta_h + int(h * 0.05)
 
         # 3. Pulsing Subscribe Button
-        if show_subscribe:
+        if config.get("outro_show_subscribe", True):
             btn_text = "SUBSCRIBE"
             pulse_period = 1.5
             pulse_scale = 1.0 + 0.03 * math.sin((2.0 * math.pi * rel_t) / pulse_period)
@@ -371,7 +489,7 @@ def apply_outro_overlay(frame: np.ndarray, t: float, scene_duration: float, outr
             cur_y += btn_h + int(h * 0.05)
 
         # 4. Like & Share Badges
-        if show_like:
+        if config.get("outro_show_like", True):
             like_badge = "👍 LIKE   🔔 NOTIFY   ↗ SHARE"
             lw, lh = measure_text_with_spacing(draw, like_badge, font_channel, 2)
             lx = center_x - (lw // 2)
@@ -379,65 +497,12 @@ def apply_outro_overlay(frame: np.ndarray, t: float, scene_duration: float, outr
             cur_y += lh + int(h * 0.04)
 
         # 5. Channel Handle
-        ch_x = center_x - (ch_w // 2)
-        draw_readable_text(draw, (ch_x, cur_y), channel_name, font_channel, (200, 220, 255, alpha), 2)
+        if channel_name:
+            cx_x = center_x - (ch_w // 2)
+            draw_readable_text(draw, (cx_x, cur_y), channel_name, font_channel, (255, 235, 59, alpha), 2)
 
-        out_pil = Image.alpha_composite(base_pil, overlay)
-        return np.array(out_pil.convert("RGB"))
+        final_pil = Image.alpha_composite(base_pil, overlay).convert("RGB")
+        return np.array(final_pil)
 
-    except Exception as e:
-        safe_print(f"⚠️ apply_outro_overlay notice: {e}")
-        return frame
-
-
-# ── 4. KINETIC INFO GRAPHIC / DATA CALLOUT OVERLAY ───────────────────────────
-def apply_fact_callout_overlay(frame: np.ndarray, t: float, fact_card: dict, config: dict) -> np.ndarray:
-    """
-    Draws a documentary-style On-Screen Data Callout badge over real video frame.
-    Shows label, stat number/value, and peak time timestamp indicator.
-    """
-    if not fact_card or not isinstance(fact_card, dict):
-        return frame
-
-    label = str(fact_card.get("label", "KEY STATISTIC")).upper().strip()
-    val = str(fact_card.get("value", "")).strip()
-    peak_t = str(fact_card.get("peak_time", "")).strip()
-
-    if not val:
-        return frame
-
-    try:
-        h, w = frame.shape[:2]
-        base_pil = Image.fromarray(frame).convert("RGBA")
-        overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(overlay)
-
-        font_val = get_cached_font("DejaVuSans-Bold.ttf", max(24, int(h * 0.05)))
-        font_lbl = get_cached_font("DejaVuSans-Bold.ttf", max(14, int(h * 0.025)))
-
-        vw, vh = measure_text_with_spacing(draw, val, font_val, 2)
-        lw, lh = measure_text_with_spacing(draw, label, font_lbl, 2)
-
-        badge_w = max(vw, lw) + 40
-        badge_h = vh + lh + 30
-
-        # Upper right placement
-        bx = w - badge_w - int(w * 0.05)
-        by = int(h * 0.08)
-
-        bg_col = (10, 20, 40, 210)
-        border_col = (68, 136, 255, 240)
-
-        # Draw callout box
-        draw.rounded_rectangle([bx, by, bx + badge_w, by + badge_h], radius=15, fill=bg_col, outline=border_col, width=3)
-
-        # Label & Value
-        draw_text_with_spacing(draw, (bx + 20, by + 12), label, font_lbl, (180, 210, 255, 255), 2)
-        draw_text_with_spacing(draw, (bx + 20, by + 16 + lh), val, font_val, (255, 255, 255, 255), 2)
-
-        out_pil = Image.alpha_composite(base_pil, overlay)
-        return np.array(out_pil.convert("RGB"))
-
-    except Exception as e:
-        safe_print(f"⚠️ apply_fact_callout_overlay notice: {e}")
+    except Exception:
         return frame

@@ -300,30 +300,37 @@ def render_sidebar() -> dict:
         # ── 5. INTRO / OUTRO / CARDS ─────────────────────────
         st.header("🎬 Intro / Outro / Cards")
 
+        overlay_preset_choice = st.selectbox(
+            "🎨 Master Title Theme Preset",
+            ["🎬 Cinematic Warm", "🔮 Neon Synthwave", "💥 MrBeast Energy", "🍿 Cinema Minimalist", "Custom (Per-Card Overrides)"],
+            index=0,
+            help="Applies a unified typography, color, and animation language across Intro, Chapter, and Outro cards together!"
+        )
+
+        auto_color_from_video = st.checkbox("🎯 Auto-Extract Color from Video Frame", value=False, help="Dynamically samples dominant color from video clips to auto-style accent colors!")
+
         with st.expander("🎬 Intro Title Card", expanded=False):
             show_intro = st.checkbox("Enable Intro Card", value=True)
             intro_duration = st.slider("Intro Duration (sec)", 2.0, 6.0, 4.0, 0.5)
-            intro_position = st.selectbox(
-                "Screen Position",
-                ["Top", "Center", "Bottom", "Custom"],
-                index=1
-            )
-            intro_custom_y_pct = st.slider("Custom Y% (0=Top, 100=Bottom)", 0, 100, 50, 1)
-            intro_title_size_scale = st.slider("Title Font Scale", 0.5, 2.5, 1.0, 0.1)
             intro_style_override = st.selectbox(
                 "Animation Style",
-                ["AI Auto-Pick", "Particle Assemble", "Glow Reveal", "Cinematic Scale", "Typewriter"],
+                ["AI Auto-Pick", "Blur to Sharp", "Neon Trace", "Split Reveal", "Glow Reveal", "Particle Assemble", "Cinematic Scale", "Typewriter"],
                 index=0
             )
-            intro_bg_style = st.selectbox(
-                "Background",
-                ["Solid Black", "Gradient Dark", "Radial Glow"],
-                index=2
-            )
-            intro_title_color = st.color_picker("Title Color", "#FFFFFF")
-            intro_glow_color = st.color_picker("Glow Color", "#4488FF")
-            intro_glow_radius = st.slider("Glow Intensity", 0, 30, 15)
-            intro_letter_spacing = st.slider("Letter Spacing", 0, 20, 8)
+            col_t1, col_t2 = st.columns(2)
+            with col_t1:
+                intro_start_tracking = st.slider("Start Tracking (px)", 10, 60, 36, 2, help="Letters start wide apart on reveal")
+            with col_t2:
+                intro_end_tracking = st.slider("End Tracking (px)", 0, 20, 8, 1, help="Letters compress inward to settled spacing")
+
+            col_g1, col_g2 = st.columns(2)
+            with col_g1:
+                grad_stop1 = st.color_picker("Text Gradient Stop 1", "#FFD700")
+            with col_g2:
+                grad_stop2 = st.color_picker("Text Gradient Stop 2", "#FF7828")
+
+            intro_glow_color = st.color_picker("Glow Color", "#FF8C00")
+            intro_glow_radius = st.slider("Glow Intensity", 0, 30, 18)
             intro_show_subtitle = st.checkbox("Show Subtitle Tagline", True)
             intro_subtitle_color = st.color_picker("Subtitle Color", "#9999CC")
 
@@ -331,7 +338,7 @@ def render_sidebar() -> dict:
             show_chapters = st.checkbox("Enable Chapter Cards", value=True)
             chapter_style = st.selectbox(
                 "Animation",
-                ["Slide Horizontal", "Slide Vertical", "Fade", "Wipe"],
+                ["Bracket Frame", "Underline Draw", "Slide Horizontal", "Slide Vertical", "Fade", "Wipe"],
                 index=0
             )
             chapter_position = st.selectbox(
@@ -339,10 +346,10 @@ def render_sidebar() -> dict:
                 ["Center", "Lower Third", "Upper Third"],
                 index=0
             )
-            chapter_bg_color = st.color_picker("Card Background", "#000000")
-            chapter_bg_opacity = st.slider("Card Opacity", 0, 255, 180)
+            chapter_bg_color = st.color_picker("Card Background", "#0F172A")
+            chapter_bg_opacity = st.slider("Card Opacity", 0, 255, 200)
             chapter_text_color = st.color_picker("Text Color", "#FFFFFF")
-            chapter_accent_color = st.color_picker("Accent / Line Color", "#4488FF")
+            chapter_accent_color = st.color_picker("Accent / Line Color", "#FFA028")
             chapter_show_lines = st.checkbox("Show Decorative Lines", True)
 
         with st.expander("🎬 Outro Card", expanded=False):
@@ -352,10 +359,7 @@ def render_sidebar() -> dict:
             outro_cta_override = st.text_input("CTA Text Override (blank = AI picks)", "")
             outro_show_subscribe = st.checkbox("Show Subscribe Button", True)
             outro_show_like = st.checkbox("Show Like & Share", True)
-            outro_accent_color = st.color_picker("Accent Color", "#FF0000")
-            outro_bg_style = st.selectbox(
-                "Background", ["Solid Black", "Gradient Dark"], index=0
-            )
+            outro_accent_color = st.color_picker("Accent Color", "#FF7828")
 
     # ── Convert Hex Colors to RGBA/RGB ──
     def hex_to_rgb_tuple(h):
@@ -453,18 +457,19 @@ def render_sidebar() -> dict:
         "ai_language":     ai_language,
         "enable_ai_image_fallback": enable_ai_image_fallback,
 
+        # Title Cards & Motion Graphics Settings
+        "overlay_preset": overlay_preset_choice,
+        "auto_color_from_video": auto_color_from_video,
+
         # Intro Card Settings
         "show_intro": show_intro,
         "intro_duration": intro_duration,
-        "intro_position": intro_position,
-        "intro_custom_y_pct": intro_custom_y_pct,
-        "intro_title_size_scale": intro_title_size_scale,
         "intro_style_override": None if intro_style_override == "AI Auto-Pick" else intro_style_override.lower().replace(" ", "_"),
-        "intro_bg_style": intro_bg_style.lower().replace(" ", "_"),
-        "intro_title_color": hex_to_rgb_tuple(intro_title_color),
+        "intro_start_tracking": intro_start_tracking,
+        "intro_end_tracking": intro_end_tracking,
+        "gradient_colors": (hex_to_rgb_tuple(grad_stop1), hex_to_rgb_tuple(grad_stop2)),
         "intro_glow_color": hex_to_rgb_tuple(intro_glow_color),
         "intro_glow_radius": intro_glow_radius,
-        "intro_letter_spacing": intro_letter_spacing,
         "intro_show_subtitle": intro_show_subtitle,
         "intro_subtitle_color": hex_to_rgb_tuple(intro_subtitle_color),
 
@@ -485,7 +490,6 @@ def render_sidebar() -> dict:
         "outro_show_subscribe": outro_show_subscribe,
         "outro_show_like": outro_show_like,
         "outro_accent_color": hex_to_rgb_tuple(outro_accent_color),
-        "outro_bg_style": outro_bg_style.lower().replace(" ", "_"),
     })
 
     return {

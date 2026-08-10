@@ -225,22 +225,6 @@ def render_page(sidebar_data: dict, api_keys: dict, keys_ready: bool):
         f"Subtitles synced to your voice timestamps"
     )
 
-    # ── AI SCRIPT INSIGHTS, VIDEO TITLE & FACT TIMESTAMPS BOX ─────────────
-    with st.expander("📊 AI Script Insights, 3-4 Word Video Title & Fact Callouts", expanded=True):
-        st.markdown("##### 🎬 AI-Generated Video Title (3-4 Words)")
-        custom_title = video_config.get("intro_title_override") or "THE COSMIC ODYSSEY BEGINS"
-        st.subheader(f"🏷️ \"{custom_title}\"")
-
-        st.markdown("##### ⏱️ Extracted Key Script Facts & Timestamps")
-        fact_samples = [
-            {"time": "00:00s - 00:04s", "label": "CHAPTER 1", "value": "THE BEGINNING", "detail": "Intro Title Card & Topic Hook over stock video"},
-            {"time": "00:04s - 00:08s", "label": "ATMOSPHERE", "value": "95% CO2", "detail": "Key scientific fact extracted from voiceover narration"},
-            {"time": "00:08s - 00:12s", "label": "LOCATION", "value": "MARS SURFACE", "detail": "📍 Lower-third location callout synced to audio"},
-            {"time": "00:12s - 00:16s", "label": "OUTRO CTA", "value": "@YourChannel", "detail": "Pulsing Subscribe Button & Outro CTA overlay"},
-        ]
-        
-        st.table(fact_samples)
-
     render_disabled = not keys_ready or (uploaded_file is None)
     render_tooltip  = (
         "Upload an audio file first." if uploaded_file is None
