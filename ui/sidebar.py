@@ -210,6 +210,7 @@ def render_sidebar() -> dict:
             )
             size_scale = st.slider("Font Scale", 0.5, 2.0, float(sub_pkg_defaults.get("size_scale", 1.0)), 0.05)
             letter_spacing = st.slider("Letter Spacing (px)", 0, 10, int(sub_pkg_defaults.get("letter_spacing", 0)), 1)
+            word_spacing = st.slider("Word Spacing (px)", 0, 30, int(sub_pkg_defaults.get("word_spacing", 10)), 1)
 
         # ── EXPANDER 2: POSITIONING & LAYOUT ──
         with st.expander("📍 Positioning & Text Layout", expanded=False):
@@ -389,6 +390,7 @@ def render_sidebar() -> dict:
         "font":             font_choice,
         "size_scale":       size_scale,
         "letter_spacing":   letter_spacing,
+        "word_spacing":     word_spacing,
         "position":         sub_position,
         "custom_y_pct":     custom_y_pct,
         "layout_mode":      layout_mode,

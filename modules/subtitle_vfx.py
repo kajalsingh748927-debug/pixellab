@@ -185,6 +185,7 @@ def draw_kinetic_subtitles(frame, text, t, duration, config, word_timestamps=Non
     shadow             = get_cfg("shadow", None)
     glow               = get_cfg("glow", None)
     letter_spacing     = get_cfg("letter_spacing", 0)
+    word_spacing       = get_cfg("word_spacing", 10)
     enable_emojis      = get_cfg("enable_emojis", True)
     underline_bar      = get_cfg("underline_bar", False)
     cursor_blink       = get_cfg("cursor_blink", False)
@@ -244,7 +245,8 @@ def draw_kinetic_subtitles(frame, text, t, duration, config, word_timestamps=Non
     draw = ImageDraw.Draw(overlay)
 
     word_dims = [measure_text_with_spacing(draw, w_text, font, letter_spacing) for w_text in final_words]
-    space_w, _ = measure_text_with_spacing(draw, " ", font, letter_spacing)
+    base_space_w, _ = measure_text_with_spacing(draw, " ", font, letter_spacing)
+    space_w = base_space_w + word_spacing
 
     lines = []
     if layout_mode == "Two Lines" and len(final_words) > 3:

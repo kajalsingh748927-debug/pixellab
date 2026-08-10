@@ -45,42 +45,67 @@ def _save_uploaded_audio(uploaded_file) -> str | None:
 
 def _render_live_preview_section(video_config: dict, api_keys: dict):
     """
-    Renders an interactive Live Preview panel.
+    Renders an interactive Live Preview panel for Subtitles, Intro Cards, Chapter Cards, and Outro Cards.
     Updates instantly (~10ms) whenever the user modifies sidebar settings.
-    Includes a 3-second quick video clip sampler.
     """
-    with st.expander("👁️ Real-Time Live Style & Subtitle Preview (Instant Updates)", expanded=True):
+    with st.expander("👁️ Real-Time Live Style & Title Card Preview (Instant Updates)", expanded=True):
+        preview_mode = st.radio(
+            "Target Preview Mode:",
+            ["💬 Kinetic Subtitles Pass", "🎬 Intro Title Card", "📖 Chapter Title Card", "🎬 Outro CTA Card"],
+            index=0,
+            horizontal=True
+        )
+
         col_img, col_ctrl = st.columns([1.6, 1])
 
         with col_ctrl:
-            st.markdown("##### ⚙️ Subtitle & Style Live Tester")
-            test_text = st.text_input(
-                "💬 Custom Test Sentence:",
-                value="NEON CITIES ARE EXPANDING ACROSS THE WORLD TODAY 🔥",
-                help="Type any sentence to see font, size, position, active word glow, and emojis live."
-            )
-            words = [w for w in test_text.split() if w]
-            max_idx = max(len(words), 1)
-            active_idx = st.slider("Highlight Word Index", 1, max_idx, min(3, max_idx))
+            if preview_mode == "💬 Kinetic Subtitles Pass":
+                st.markdown("##### ⚙️ Subtitle & Style Live Tester")
+                test_text = st.text_input(
+                    "💬 Custom Test Sentence:",
+                    value="NEON CITIES ARE EXPANDING ACROSS THE WORLD TODAY 🔥",
+                    help="Type any sentence to see font, size, position, active word glow, and emojis live."
+                )
+                words = [w for w in test_text.split() if w]
+                max_idx = max(len(words), 1)
+                active_idx = st.slider("Highlight Word Index", 1, max_idx, min(3, max_idx))
 
-            st.caption(f"📐 **Ratio:** {video_config.get('aspect_ratio', '').split('(')[0].strip()}")
-            st.caption(f"🍿 **Cinematic Bundle:** {video_config.get('cinematic_package', 'Custom')}")
-            st.caption(f"🎨 **Color Grade:** {video_config.get('color_grade', 'None')}")
-            st.caption(f"💬 **Typography Package:** {video_config.get('subtitle_package', 'Custom')}")
-            st.caption(f"💬 **Font & Size:** {video_config.get('font', 'Default')} ({video_config.get('size', 42)}pt)")
-            st.caption(f"📍 **Text Position:** {video_config.get('position', 'Bottom')}")
+                st.caption(f"📐 **Ratio:** {video_config.get('aspect_ratio', '').split('(')[0].strip()}")
+                st.caption(f"💬 **Package:** {video_config.get('subtitle_package', 'Custom')}")
+                st.caption(f"🔤 **Letter Spacing:** {video_config.get('letter_spacing', 0)}px | **Word Spacing:** {video_config.get('word_spacing', 10)}px")
+                st.caption(f"📍 **Position:** {video_config.get('position', 'Bottom')}")
+
+            elif preview_mode == "🎬 Intro Title Card":
+                st.markdown("##### 🎬 Intro Card Live Tester")
+                intro_title = st.text_input("Intro Title:", value="PIXELAB DEMO")
+                intro_sub = st.text_input("Intro Subtitle Tagline:", value="THE ULTIMATE AI VIDEO GENERATOR")
+                st.caption(f"✨ **Anim Style:** {video_config.get('intro_style_override') or 'glow_reveal'}")
+                st.caption(f"🎨 **BG Style:** {video_config.get('intro_bg_style', 'radial_glow')}")
+
+            elif preview_mode == "📖 Chapter Title Card":
+                st.markdown("##### 📖 Chapter Card Live Tester")
+                chapter_title = st.text_input("Chapter Title:", value="PART 1: THE REVOLUTION")
+                st.caption(f"✨ **Anim Style:** {video_config.get('chapter_card_style', 'slide_horizontal')}")
+                st.caption(f"📍 **Position:** {video_config.get('chapter_card_position', 'center')}")
+
+            else:  # Outro CTA Card
+                st.markdown("##### 🎬 Outro Card Live Tester")
+                outro_thanks = st.text_input("Thanks Heading:", value="THANKS FOR WATCHING!")
+                outro_cta = st.text_input("CTA Text:", value="LIKE & SUBSCRIBE FOR MORE")
+                outro_channel = st.text_input("Channel Handle:", value=video_config.get("outro_channel_name", "@YourChannel"))
+                st.caption(f"🎨 **Accent Color:** {video_config.get('outro_accent_color', (255, 0, 0))}")
 
             # 3-Second Quick Clip Sampler
             if st.button("⚡ Render 3-Sec Quick Preview Clip", use_container_width=True, help="Renders a 3-second sample clip to preview motion, audio sync, and transitions in ~3s"):
                 with st.spinner("⚡ Rendering 3-second sample clip..."):
                     _inject_api_keys(api_keys)
                     test_scenes = [{
-                        "narration": test_text,
+                        "narration": "NEON CITIES ARE EXPANDING ACROSS THE WORLD TODAY",
                         "search_query": "futuristic city",
                     }]
                     preview_out = os.path.join(OUTPUT_DIR, "quick_preview.mp4")
                     cfg = dict(video_config)
-                    cfg["enable_bg_music"] = False  # Keep test clip light
+                    cfg["enable_bg_music"] = False
                     success = build_master_video(test_scenes, cfg, output_filename="quick_preview.mp4")
                     if success and os.path.exists(preview_out):
                         st.session_state["quick_preview_video"] = preview_out
@@ -94,14 +119,38 @@ def _render_live_preview_section(video_config: dict, api_keys: dict):
         with col_img:
             # Generate instant preview frame (~10ms)
             try:
-                preview_frame = generate_live_preview_frame(
-                    video_config,
-                    sample_text=test_text,
-                    active_word_index=active_idx - 1
-                )
+                aspect = video_config.get("aspect_ratio", "16:9 Landscape (YouTube)")
+                if "9:16" in aspect:
+                    w_pv, h_pv = 540, 960
+                elif "1:1" in aspect:
+                    w_pv, h_pv = 640, 640
+                else:
+                    w_pv, h_pv = 960, 540
+
+                if preview_mode == "🎬 Intro Title Card":
+                    from modules.intro_card import render_intro_frame
+                    preview_frame = render_intro_frame(1.0, 3.0, intro_title, intro_sub, video_config, w=w_pv, h=h_pv)
+
+                elif preview_mode == "📖 Chapter Title Card":
+                    from modules.scene_title import apply_scene_title
+                    bg_dummy = np.zeros((h_pv, w_pv, 3), dtype=np.uint8)
+                    bg_dummy[:, :] = (30, 40, 60)
+                    preview_frame = apply_scene_title(bg_dummy, 0.8, chapter_title, video_config)
+
+                elif preview_mode == "🎬 Outro CTA Card":
+                    from modules.outro_card import render_outro_frame
+                    preview_frame = render_outro_frame(1.5, 4.0, outro_thanks, outro_cta, outro_channel, video_config, w=w_pv, h=h_pv)
+
+                else:
+                    preview_frame = generate_live_preview_frame(
+                        video_config,
+                        sample_text=test_text,
+                        active_word_index=active_idx - 1
+                    )
+
                 st.image(
                     preview_frame,
-                    caption=f"Live Preview | {video_config.get('aspect_ratio', '')} | Grade: {video_config.get('color_grade', 'None')}",
+                    caption=f"Live Preview | {preview_mode} | {video_config.get('aspect_ratio', '')}",
                     use_container_width=True
                 )
             except Exception as e:
