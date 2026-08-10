@@ -311,21 +311,29 @@ def analyze_transcript(scenes: list, api_key: str, tone: str = "Cinematic & Epic
         f"ALSO generate 'english_subtitle': clean 100% English translation of the narration for kinetic subtitles. "
         f"ALSO generate 'emphasis_words': key impact words for spring-zoom. "
         f"ALSO generate optional 'map_location' and 'fact_card'. "
+        f"ALSO generate per-scene 'chapter_title' (short 2-4 word uppercase title) and 'show_chapter' (boolean true if scene represents a major topic transition). "
+        f"ALSO generate top-level 'intro' object (keys: 'title', 'subtitle') and 'outro' object (keys: 'thanks_text', 'cta_text'). "
         f"For each scene return: "
         f"1. 'english_subtitle': Clean English translation. "
         f"2. 'expected_visual': Literal description of ideal shot. "
         f"3. 'search_query': Primary ENGLISH ONLY visual search query anchored to '{brief.get('topic')}'. "
         f"4. 'alt_queries': List of 2 backup search terms. "
         f"5. 'emphasis_words': Key impact numbers/words. "
-        f"6. 'map_location': Optional location or null. "
-        f"7. 'fact_card': Optional fact object or null. "
-        f"Return ONLY a JSON object with a 'scenes' array of {scene_count} objects."
+        f"6. 'chapter_title': Short uppercase section title. "
+        f"7. 'show_chapter': boolean true/false. "
+        f"8. 'map_location': Optional location or null. "
+        f"9. 'fact_card': Optional fact object or null. "
+        f"Return ONLY a JSON object with 'intro', 'outro', and 'scenes' array of {scene_count} objects."
     )
 
     client = Groq(api_key=api_key)
     try:
         parsed = _call_groq_json(client, f"Scenes:\n{scene_lines}", system_prompt=system_instruction)
         llm_scenes = parsed.get("scenes", [])
+
+        # Store intro / outro in brief / scene meta if present
+        brief["intro"] = parsed.get("intro", {"title": topic.upper(), "subtitle": "DOCUMENTARY SHORT"})
+        brief["outro"] = parsed.get("outro", {"thanks_text": "THANKS FOR WATCHING", "cta_text": "LIKE & SUBSCRIBE FOR MORE"})
 
         for i, sc in enumerate(scenes):
             narration_txt = sc.get("narration", "")
@@ -339,7 +347,6 @@ def analyze_transcript(scenes: list, api_key: str, tone: str = "Cinematic & Epic
                 raw_emph = llm_scenes[i].get("emphasis_words", [])
 
                 clean_q = clean_stock_query(raw_q)
-                # Check if query is a sentence fragment
                 if not clean_q or any(clean_q.startswith(frag) for frag in ["for decades", "but a", "steps out", "physical world"]):
                     clean_q = smart_fallback
 
@@ -348,6 +355,8 @@ def analyze_transcript(scenes: list, api_key: str, tone: str = "Cinematic & Epic
                 sc["expected_visual"] = raw_vis or f"Visual shot of {sc['search_query']}"
                 sc["english_subtitle"] = raw_eng_sub or narration_txt
                 sc["emphasis_words"] = [str(w).upper().strip() for w in raw_emph if w]
+                sc["chapter_title"] = str(llm_scenes[i].get("chapter_title", f"PART {i+1}")).upper().strip()
+                sc["show_chapter"] = bool(llm_scenes[i].get("show_chapter", i == 0))
             else:
                 sc["search_query"] = smart_fallback
                 sc["alt_queries"]  = [clean_stock_query(topic + " landscape")]
@@ -355,8 +364,10 @@ def analyze_transcript(scenes: list, api_key: str, tone: str = "Cinematic & Epic
                 sc["english_subtitle"] = narration_txt
                 words = narration_txt.split()
                 sc["emphasis_words"]   = [w.upper() for w in words if any(c.isdigit() for c in w)]
+                sc["chapter_title"] = f"SCENE {i+1}"
+                sc["show_chapter"] = (i == 0)
 
-        safe_print(f"AI Director: queries, expected visuals, and English subtitles generated for {len(scenes)} scenes.")
+        safe_print(f"AI Director: queries, expected visuals, chapter titles, and English subtitles generated for {len(scenes)} scenes.")
         return scenes
 
     except Exception as e:
@@ -368,4 +379,6 @@ def analyze_transcript(scenes: list, api_key: str, tone: str = "Cinematic & Epic
             sc["alt_queries"]  = [clean_stock_query(topic + " background")]
             sc["expected_visual"] = f"Visual shot of {sc['search_query']}"
             sc["english_subtitle"] = narration_txt
+            sc["chapter_title"] = "OVERVIEW"
+            sc["show_chapter"] = False
         return scenes

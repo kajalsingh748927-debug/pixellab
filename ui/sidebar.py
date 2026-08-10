@@ -294,6 +294,61 @@ def render_sidebar() -> dict:
         )
         enable_ai_image_fallback = st.checkbox("🎨 AI Image Fallback", value=True)
 
+        st.divider()
+
+        # ── 5. INTRO / OUTRO / CARDS ─────────────────────────
+        st.header("🎬 Intro / Outro / Cards")
+
+        with st.expander("🎬 Intro Title Card", expanded=False):
+            show_intro = st.checkbox("Enable Intro Card", value=True)
+            intro_duration = st.slider("Intro Duration (sec)", 2.0, 6.0, 3.0, 0.5)
+            intro_style_override = st.selectbox(
+                "Animation Style",
+                ["AI Auto-Pick", "Particle Assemble", "Glow Reveal", "Cinematic Scale", "Typewriter"],
+                index=0
+            )
+            intro_bg_style = st.selectbox(
+                "Background",
+                ["Solid Black", "Gradient Dark", "Radial Glow"],
+                index=2
+            )
+            intro_title_color = st.color_picker("Title Color", "#FFFFFF")
+            intro_glow_color = st.color_picker("Glow Color", "#4488FF")
+            intro_glow_radius = st.slider("Glow Intensity", 0, 30, 15)
+            intro_letter_spacing = st.slider("Letter Spacing", 0, 20, 8)
+            intro_show_subtitle = st.checkbox("Show Subtitle Tagline", True)
+            intro_subtitle_color = st.color_picker("Subtitle Color", "#9999CC")
+
+        with st.expander("📖 Chapter Title Cards", expanded=False):
+            show_chapters = st.checkbox("Enable Chapter Cards", value=True)
+            chapter_style = st.selectbox(
+                "Animation",
+                ["Slide Horizontal", "Slide Vertical", "Fade", "Wipe"],
+                index=0
+            )
+            chapter_position = st.selectbox(
+                "Position",
+                ["Center", "Lower Third", "Upper Third"],
+                index=0
+            )
+            chapter_bg_color = st.color_picker("Card Background", "#000000")
+            chapter_bg_opacity = st.slider("Card Opacity", 0, 255, 180)
+            chapter_text_color = st.color_picker("Text Color", "#FFFFFF")
+            chapter_accent_color = st.color_picker("Accent / Line Color", "#4488FF")
+            chapter_show_lines = st.checkbox("Show Decorative Lines", True)
+
+        with st.expander("🎬 Outro Card", expanded=False):
+            show_outro = st.checkbox("Enable Outro Card", value=True)
+            outro_duration = st.slider("Outro Duration (sec)", 2.0, 6.0, 4.0, 0.5)
+            outro_channel_name = st.text_input("Channel Name", "@YourChannel")
+            outro_cta_override = st.text_input("CTA Text Override (blank = AI picks)", "")
+            outro_show_subscribe = st.checkbox("Show Subscribe Button", True)
+            outro_show_like = st.checkbox("Show Like & Share", True)
+            outro_accent_color = st.color_picker("Accent Color", "#FF0000")
+            outro_bg_style = st.selectbox(
+                "Background", ["Solid Black", "Gradient Dark"], index=0
+            )
+
     # ── Convert Hex Colors to RGBA/RGB ──
     def hex_to_rgb_tuple(h):
         h = h.lstrip("#")
@@ -388,6 +443,37 @@ def render_sidebar() -> dict:
         "ai_tone":         ai_tone,
         "ai_language":     ai_language,
         "enable_ai_image_fallback": enable_ai_image_fallback,
+
+        # Intro Card Settings
+        "show_intro": show_intro,
+        "intro_duration": intro_duration,
+        "intro_style_override": None if intro_style_override == "AI Auto-Pick" else intro_style_override.lower().replace(" ", "_"),
+        "intro_bg_style": intro_bg_style.lower().replace(" ", "_"),
+        "intro_title_color": hex_to_rgb_tuple(intro_title_color),
+        "intro_glow_color": hex_to_rgb_tuple(intro_glow_color),
+        "intro_glow_radius": intro_glow_radius,
+        "intro_letter_spacing": intro_letter_spacing,
+        "intro_show_subtitle": intro_show_subtitle,
+        "intro_subtitle_color": hex_to_rgb_tuple(intro_subtitle_color),
+
+        # Chapter Title Cards Settings
+        "show_chapter_cards": show_chapters,
+        "chapter_card_style": chapter_style.lower().replace(" ", "_"),
+        "chapter_card_position": chapter_position.lower().replace(" ", "_"),
+        "chapter_card_bg_color": hex_to_rgb_tuple(chapter_bg_color) + (chapter_bg_opacity,),
+        "chapter_card_text_color": hex_to_rgb_tuple(chapter_text_color),
+        "chapter_card_accent_color": hex_to_rgb_tuple(chapter_accent_color),
+        "chapter_card_show_lines": chapter_show_lines,
+
+        # Outro Card Settings
+        "show_outro": show_outro,
+        "outro_duration": outro_duration,
+        "outro_channel_name": outro_channel_name,
+        "outro_cta_override": outro_cta_override if outro_cta_override else None,
+        "outro_show_subscribe": outro_show_subscribe,
+        "outro_show_like": outro_show_like,
+        "outro_accent_color": hex_to_rgb_tuple(outro_accent_color),
+        "outro_bg_style": outro_bg_style.lower().replace(" ", "_"),
     })
 
     return {

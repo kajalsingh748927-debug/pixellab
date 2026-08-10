@@ -285,6 +285,14 @@ def build_master_video_from_audio(
             )
         clip = clip.transform(subtitle_filter)
 
+        # ── Chapter Title Card Overlay (First 2.5s) ────────────────────────────
+        if sc.get("show_chapter") and config.get("show_chapter_cards", True):
+            chapter = sc.get("chapter_title", f"PART {idx}")
+            from modules.scene_title import apply_scene_title
+            def chapter_filter(get_frame, t, _ch=chapter, _cfg=config):
+                return apply_scene_title(get_frame(t), t, _ch, _cfg)
+            clip = clip.transform(chapter_filter)
+
         # ── Crossfade transition ────────────────────────────────────────────────
         if fade_dur > 0:
             clip = clip.with_effects([vfx.CrossFadeIn(fade_dur), vfx.CrossFadeOut(fade_dur)])
@@ -329,6 +337,38 @@ def build_master_video_from_audio(
         safe_print("❌ No clips processed.")
         update_and_notify(0, "❌ No clips were successfully processed.")
         return False
+
+    # ── Render Intro & Outro Cards ─────────────────────────────────────────────
+    if config.get("show_intro", True):
+        try:
+            update_and_notify(80, "🎬 Generating Intro Title Card sequence...")
+            from modules.intro_card import generate_intro_clip
+            intro_title = config.get("intro_title_override") or scenes[0].get("search_query", "PIXELAB").upper()
+            intro_sub = config.get("intro_subtitle_override") or scenes[0].get("english_subtitle", "")[:45]
+            intro_clip = generate_intro_clip(intro_title, intro_sub, config)
+            intro_fn = os.path.join(TEMP_DIR, "intro_chunk_00.mp4")
+            intro_clip.write_videofile(intro_fn, codec=codec, audio=False, fps=FPS, bitrate=DEFAULT_BITRATE, ffmpeg_params=ffmpeg_params, logger="bar")
+            intro_clip.close()
+            processed_clips.insert(0, intro_fn)
+            safe_print("  ✅ Intro Title Card clip rendered.")
+        except Exception as ie:
+            safe_print(f"  ⚠️ Intro Card notice: {ie}")
+
+    if config.get("show_outro", True):
+        try:
+            update_and_notify(82, "🎬 Generating Outro CTA Card sequence...")
+            from modules.outro_card import generate_outro_clip
+            thanks_txt = config.get("outro_thanks_text", "THANKS FOR WATCHING!")
+            cta_txt = config.get("outro_cta_override", "LIKE & SUBSCRIBE FOR MORE")
+            ch_name = config.get("outro_channel_name", "@YourChannel")
+            outro_clip = generate_outro_clip(thanks_txt, cta_txt, ch_name, config)
+            outro_fn = os.path.join(TEMP_DIR, f"outro_chunk_{len(processed_clips)+1:02d}.mp4")
+            outro_clip.write_videofile(outro_fn, codec=codec, audio=False, fps=FPS, bitrate=DEFAULT_BITRATE, ffmpeg_params=ffmpeg_params, logger="bar")
+            outro_clip.close()
+            processed_clips.append(outro_fn)
+            safe_print("  ✅ Outro CTA Card clip rendered.")
+        except Exception as oe:
+            safe_print(f"  ⚠️ Outro Card notice: {oe}")
 
     # ── Master Video Assembly (Transitions vs Fast Stream Copy) ────────────────
     enable_trans = config.get("enable_transitions", True)
