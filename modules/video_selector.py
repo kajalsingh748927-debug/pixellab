@@ -216,7 +216,10 @@ def select_best_candidate(
     try:
         response = client.chat.completions.create(
             model=SELECTION_MODEL,
-            messages=[{"role": "user", "content": content}],
+            messages=[
+                {"role": "system", "content": "You are an expert film editor. You MUST output valid JSON format with keys best_index, confidence, and reason."},
+                {"role": "user", "content": content}
+            ],
             response_format={"type": "json_object"},
             timeout=18,
         )

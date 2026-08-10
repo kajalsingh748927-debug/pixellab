@@ -181,28 +181,64 @@ def _transcribe_chunk_groq(audio_path: str, api_key: str) -> str:
 
 def _split_audio_chunks(audio_path: str, chunk_sec: int = 100) -> list:
     """
-    Splits audio into chunk_sec-second WAV chunks using moviepy.
-    Returns list of temp file paths. Falls back to [audio_path] on error.
+    Splits audio into chunk_sec-second chunks using ffmpeg subprocess.
+    Returns list of (temp_path, start_offset) tuples. Falls back to [(audio_path, 0.0)] on error.
     """
+    import tempfile, math, subprocess, shutil
     try:
-        from moviepy import AudioFileClip
-        import tempfile, math
-        clip     = AudioFileClip(audio_path)
-        duration = clip.duration
-        chunks   = []
-        for i in range(math.ceil(duration / chunk_sec)):
+        import imageio_ffmpeg
+        ffmpeg_bin = imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        ffmpeg_bin = shutil.which("ffmpeg") or "ffmpeg"
+
+    total_duration = _get_audio_duration(audio_path)
+    if total_duration <= 0:
+        return [(audio_path, 0.0)]
+
+    ext = os.path.splitext(audio_path)[-1].lower() or ".mp3"
+    chunks = []
+    try:
+        for i in range(math.ceil(total_duration / chunk_sec)):
             t_start = i * chunk_sec
-            t_end   = min(t_start + chunk_sec, duration)
-            sub     = clip.subclipped(t_start, t_end)
-            tmp     = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-            sub.write_audiofile(tmp.name, logger=None)
-            sub.close()
-            chunks.append((tmp.name, t_start))
-        clip.close()
-        return chunks
+            t_end   = min(t_start + chunk_sec, total_duration)
+            tmp     = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
+            tmp.close()
+            cmd = [
+                ffmpeg_bin, "-y",
+                "-ss", str(t_start),
+                "-to", str(t_end),
+                "-i", audio_path,
+                "-c", "copy",
+                tmp.name
+            ]
+            res = subprocess.run(cmd, capture_output=True, timeout=60)
+            if res.returncode == 0 and os.path.exists(tmp.name) and os.path.getsize(tmp.name) > 0:
+                chunks.append((tmp.name, t_start))
+            else:
+                # Re-encode fallback if stream copy fails
+                cmd_re = [
+                    ffmpeg_bin, "-y",
+                    "-ss", str(t_start),
+                    "-to", str(t_end),
+                    "-i", audio_path,
+                    tmp.name
+                ]
+                res_re = subprocess.run(cmd_re, capture_output=True, timeout=60)
+                if res_re.returncode == 0 and os.path.exists(tmp.name) and os.path.getsize(tmp.name) > 0:
+                    chunks.append((tmp.name, t_start))
+                else:
+                    if os.path.exists(tmp.name):
+                        try: os.remove(tmp.name)
+                        except Exception: pass
+        return chunks if chunks else [(audio_path, 0.0)]
     except Exception as e:
         safe_print(f"Audio split error: {e}")
+        for p, _ in chunks:
+            if p != audio_path and os.path.exists(p):
+                try: os.remove(p)
+                except Exception: pass
         return [(audio_path, 0.0)]
+
 
 
 def _transcribe_with_groq_whisper(audio_path: str) -> dict | None:
