@@ -127,19 +127,22 @@ def _render_live_preview_section(video_config: dict, api_keys: dict):
                 else:
                     w_pv, h_pv = 960, 540
 
+                bg_dummy = np.zeros((h_pv, w_pv, 3), dtype=np.uint8)
+                bg_dummy[:, :] = (30, 40, 60)
+
                 if preview_mode == "🎬 Intro Title Card":
-                    from modules.intro_card import render_intro_frame
-                    preview_frame = render_intro_frame(1.0, 3.0, intro_title, intro_sub, video_config, w=w_pv, h=h_pv)
+                    from modules.title_overlay import apply_intro_overlay
+                    idata = {"title": intro_title, "subtitle": intro_sub}
+                    preview_frame = apply_intro_overlay(bg_dummy, 0.8, idata, video_config)
 
                 elif preview_mode == "📖 Chapter Title Card":
-                    from modules.scene_title import apply_scene_title
-                    bg_dummy = np.zeros((h_pv, w_pv, 3), dtype=np.uint8)
-                    bg_dummy[:, :] = (30, 40, 60)
-                    preview_frame = apply_scene_title(bg_dummy, 0.8, chapter_title, video_config)
+                    from modules.title_overlay import apply_chapter_overlay
+                    preview_frame = apply_chapter_overlay(bg_dummy, 0.8, chapter_title, video_config)
 
                 elif preview_mode == "🎬 Outro CTA Card":
-                    from modules.outro_card import render_outro_frame
-                    preview_frame = render_outro_frame(1.5, 4.0, outro_thanks, outro_cta, outro_channel, video_config, w=w_pv, h=h_pv)
+                    from modules.title_overlay import apply_outro_overlay
+                    odata = {"thanks_text": outro_thanks, "cta_text": outro_cta}
+                    preview_frame = apply_outro_overlay(bg_dummy, 1.5, 4.0, odata, video_config)
 
                 else:
                     preview_frame = generate_live_preview_frame(
