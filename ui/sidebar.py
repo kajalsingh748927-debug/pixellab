@@ -280,20 +280,7 @@ def render_sidebar() -> dict:
 
         st.divider()
 
-        # ── 4. SOUND DESIGN ───────────────────────────────────
-        st.header("🎵 Sound Design & Audio")
-        st.info("🎤 **Audio Upload Mode**: Your uploaded voiceover audio will be used directly.")
-
-        enable_bg_music = st.checkbox("🎵 AI Background Music & Transition SFX", value=True)
-        bg_music_mood = st.selectbox(
-            "🎵 Background Music Mood",
-            ["🎬 Cinematic Epic", "🔥 Cyberpunk Synthwave", "☕ Lo-Fi Chill", "📜 Documentary Ambient", "🚀 Energetic Action", "None"],
-            index=0,
-        )
-
-        st.divider()
-
-        # ── 5. AI DIRECTOR ───────────────────────────────────
+        # ── 4. AI DIRECTOR ───────────────────────────────────
         st.header("🤖 AI Director Settings")
         ai_tone = st.selectbox(
             "Script Tone",
@@ -396,8 +383,8 @@ def render_sidebar() -> dict:
         # Audio & AI
         "voice":           "en-US-ChristopherNeural",
         "voice_speed":     "Normal",
-        "enable_bg_music": enable_bg_music,
-        "bg_music_mood":   bg_music_mood,
+        "enable_bg_music": False,
+        "bg_music_mood":   "None",
         "ai_tone":         ai_tone,
         "ai_language":     ai_language,
         "enable_ai_image_fallback": enable_ai_image_fallback,
