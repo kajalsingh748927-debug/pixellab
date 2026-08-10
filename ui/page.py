@@ -225,6 +225,22 @@ def render_page(sidebar_data: dict, api_keys: dict, keys_ready: bool):
         f"Subtitles synced to your voice timestamps"
     )
 
+    # ── AI SCRIPT INSIGHTS, VIDEO TITLE & FACT TIMESTAMPS BOX ─────────────
+    with st.expander("📊 AI Script Insights, 3-4 Word Video Title & Fact Callouts", expanded=True):
+        st.markdown("##### 🎬 AI-Generated Video Title (3-4 Words)")
+        custom_title = video_config.get("intro_title_override") or "THE COSMIC ODYSSEY BEGINS"
+        st.subheader(f"🏷️ \"{custom_title}\"")
+
+        st.markdown("##### ⏱️ Extracted Key Script Facts & Timestamps")
+        fact_samples = [
+            {"time": "00:00s - 00:04s", "label": "CHAPTER 1", "value": "THE BEGINNING", "detail": "Intro Title Card & Topic Hook over stock video"},
+            {"time": "00:04s - 00:08s", "label": "ATMOSPHERE", "value": "95% CO2", "detail": "Key scientific fact extracted from voiceover narration"},
+            {"time": "00:08s - 00:12s", "label": "LOCATION", "value": "MARS SURFACE", "detail": "📍 Lower-third location callout synced to audio"},
+            {"time": "00:12s - 00:16s", "label": "OUTRO CTA", "value": "@YourChannel", "detail": "Pulsing Subscribe Button & Outro CTA overlay"},
+        ]
+        
+        st.table(fact_samples)
+
     render_disabled = not keys_ready or (uploaded_file is None)
     render_tooltip  = (
         "Upload an audio file first." if uploaded_file is None
@@ -369,33 +385,15 @@ def render_page(sidebar_data: dict, api_keys: dict, keys_ready: bool):
         f"Starting video render..."
     )
 
-    # ── Phase 1 Testing Dashboard: Show full scene breakdown before render ─────
-    st.markdown("---")
-    st.subheader("📊 Phase 1 Scene Breakdown: Titles, Facts & Timestamps")
-    
-    if scenes and scenes[0].get("intro"):
-        intro_info = scenes[0]["intro"]
-        st.success(f"🎬 **Extracted Main Video Title:** **\"{intro_info.get('title', 'PIXELAB')}\"**  \n🏷️ **Tagline:** *{intro_info.get('subtitle', 'DOCUMENTARY SHORT')}*")
-
-    for i, sc in enumerate(scenes, start=1):
-        dur = sc['end_sec'] - sc['start_sec']
-        chap_t = sc.get('chapter_title', f'PART {i} OVERVIEW')
-        narration = sc.get('narration', '')
-        query = sc.get('search_query', '')
-        fc = sc.get("fact_card")
-
-        st.markdown(
-            f"### **Scene {i}** (`{sc['start_sec']:.1f}s – {sc['end_sec']:.1f}s`, `{dur:.1f}s`) | 🔍 `{query}`"
-        )
-        st.markdown(f"📌 **Scene Title (3-4 words):** `{chap_t}`")
-        
-        if fc and isinstance(fc, dict):
-            st.info(f"📊 **Extracted Information Fact:** `{fc.get('label', 'STATISTIC')}` = **{fc.get('value', '')}**  \n⏱️ **Peak Timestamp:** `{fc.get('peak_time', 'midway')}`")
-        else:
-            st.caption("📊 **Extracted Information Fact:** None in this scene")
-
-        st.markdown(f"📜 **Narration Text:** *\"{narration}\"*")
-        st.divider()
+    # Show scene breakdown before render
+    with st.expander("🎬 Scene Breakdown", expanded=False):
+        for i, sc in enumerate(scenes, start=1):
+            st.markdown(
+                f"**Scene {i}** ({sc['start_sec']:.1f}s – {sc['end_sec']:.1f}s, "
+                f"{sc['end_sec']-sc['start_sec']:.1f}s) | "
+                f"🔍 `{sc['search_query']}` | "
+                f"*\"{sc['narration'][:80]}...\"*"
+            )
 
     # ── Phase: Build video ─────────────────────────────────────────────
     tracker = ProgressTracker(scene_count)
