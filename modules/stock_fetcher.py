@@ -72,18 +72,16 @@ def fetch_pexels_candidates(query, pexels_key, count=5):
         for v in videos:
             thumb = v.get("image", "")
             files = v.get("video_files", [])
-            # Prefer HD quality (>=1280px wide); fall back to best available
-            v_url = None
-            best_width = 0
-            for f in sorted(files, key=lambda x: x.get("width", 0), reverse=True):
-                w = f.get("width", 0)
-                if w >= 1280 and not v_url:
-                    v_url = f.get("link")
-                if w > best_width:
-                    best_width = w
-            if not v_url and files:
-                v_url = sorted(files, key=lambda x: x.get("width", 0), reverse=True)[0].get("link")
-            if v_url and thumb:
+            if not files or not thumb:
+                continue
+            
+            # Prefer 1080p (Full HD) or 720p (HD) — closest width to 1920
+            # This avoids downloading massive 60–100 MB 4K files which take minutes to download!
+            best_file = min(files, key=lambda f: abs(f.get("width", 1920) - 1920))
+            v_url = best_file.get("link")
+            w_found = best_file.get("width", 1920)
+
+            if v_url:
                 candidates.append({
                     "id":            v.get("id"),
                     "thumbnail_url": thumb,
@@ -91,7 +89,7 @@ def fetch_pexels_candidates(query, pexels_key, count=5):
                     "tags":          clean_q,
                     "description":   v.get("url", ""),
                     "provider":      "pexels",
-                    "width":         best_width,
+                    "width":         w_found,
                     "duration":      v.get("duration", 0),
                 })
             if len(candidates) >= count:
@@ -99,7 +97,6 @@ def fetch_pexels_candidates(query, pexels_key, count=5):
     except Exception as err:
         safe_print(f"  Pexels API notice for '{clean_q}': {err}")
     return candidates
-
 
 
 def fetch_pexels_video(query, pexels_key):
@@ -111,16 +108,16 @@ def fetch_pexels_video(query, pexels_key):
 # ─── Download Helper ──────────────────────────────────────────────────────────
 
 def download_video_stream(download_url, filename):
-    """Streams and saves a video file from URL; retries once on failure."""
+    """Streams and saves a video file from URL with aggressive timeout (fast download)."""
     for attempt in range(2):
         try:
-            res_video = requests.get(download_url, stream=True, timeout=(8, 45))
+            res_video = requests.get(download_url, stream=True, timeout=(5, 15))
             if res_video.status_code == 200:
                 with open(filename, "wb") as f:
-                    for chunk in res_video.iter_content(chunk_size=1024 * 1024):
+                    for chunk in res_video.iter_content(chunk_size=512 * 1024):
                         if chunk:
                             f.write(chunk)
-                if os.path.exists(filename) and os.path.getsize(filename) > 10_000:
+                if os.path.exists(filename) and os.path.getsize(filename) > 5_000:
                     return True
         except (requests.exceptions.RequestException, Exception) as err:
             safe_print(f"  Video download attempt {attempt+1} notice: {err}")

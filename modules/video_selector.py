@@ -221,7 +221,7 @@ def select_best_candidate(
                 {"role": "user", "content": content}
             ],
             response_format={"type": "json_object"},
-            timeout=18,
+            timeout=5,
         )
         parsed     = json.loads(response.choices[0].message.content)
         idx        = parsed.get("best_index")
