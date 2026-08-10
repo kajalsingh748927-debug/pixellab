@@ -29,7 +29,7 @@ def apply_intro_overlay(frame: np.ndarray, t: float, intro_data: dict, config: d
     Draws intro title text OVER real video frame.
     Called on Scene 1 frames for the first intro_duration seconds.
     """
-    duration = float(config.get("intro_duration", 3.0))
+    duration = float(config.get("intro_duration", 4.0))
     if t > duration:
         return frame
 
@@ -37,8 +37,13 @@ def apply_intro_overlay(frame: np.ndarray, t: float, intro_data: dict, config: d
         h, w = frame.shape[:2]
 
         intro_data = intro_data or {}
-        title = str(config.get("intro_title_override") or intro_data.get("title") or "PIXELAB").upper().strip()
-        subtitle = str(config.get("intro_subtitle_override") or intro_data.get("subtitle") or "").strip()
+        raw_override = str(config.get("intro_title_override") or "").strip()
+        raw_data_title = str(intro_data.get("title") or "").strip() if isinstance(intro_data, dict) else ""
+        title = (raw_override or raw_data_title or "PIXELAB").upper().strip()
+
+        raw_sub_override = str(config.get("intro_subtitle_override") or "").strip()
+        raw_data_sub = str(intro_data.get("subtitle") or "").strip() if isinstance(intro_data, dict) else ""
+        subtitle = (raw_sub_override or raw_data_sub or "AI VIDEO GENERATOR").strip()
 
         anim_style = (config.get("intro_style_override") or config.get("intro_animation", "glow_reveal")).lower().replace(" ", "_")
         title_color = config.get("intro_title_color", (255, 255, 255))

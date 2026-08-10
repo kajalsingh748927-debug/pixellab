@@ -367,7 +367,11 @@ def analyze_transcript(scenes: list, api_key: str, tone: str = "Cinematic & Epic
                 sc["chapter_title"] = f"SCENE {i+1}"
                 sc["show_chapter"] = (i == 0)
 
-        safe_print(f"AI Director: queries, expected visuals, chapter titles, and English subtitles generated for {len(scenes)} scenes.")
+        if scenes:
+            scenes[0]["intro"] = brief.get("intro", {"title": (topic or "PIXELAB").upper(), "subtitle": "AI VIDEO GENERATOR"})
+            scenes[-1]["outro"] = brief.get("outro", {"thanks_text": "THANKS FOR WATCHING", "cta_text": "LIKE & SUBSCRIBE FOR MORE"})
+
+        safe_print(f"AI Director: queries, expected visuals, chapter titles, intro & outro generated for {len(scenes)} scenes.")
         return scenes
 
     except Exception as e:

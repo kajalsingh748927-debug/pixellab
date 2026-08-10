@@ -302,7 +302,7 @@ def render_sidebar() -> dict:
 
         with st.expander("🎬 Intro Title Card", expanded=False):
             show_intro = st.checkbox("Enable Intro Card", value=True)
-            intro_duration = st.slider("Intro Duration (sec)", 2.0, 6.0, 3.0, 0.5)
+            intro_duration = st.slider("Intro Duration (sec)", 2.0, 6.0, 4.0, 0.5)
             intro_style_override = st.selectbox(
                 "Animation Style",
                 ["AI Auto-Pick", "Particle Assemble", "Glow Reveal", "Cinematic Scale", "Typewriter"],
