@@ -12,6 +12,7 @@ Ingests full video scripts or transcribed scenes and uses Groq LLMs
   5. Emphasis Words, Map Locations, Fact Cards.
 ─────────────────────────────────────────────────────────────────────────────
 """
+import os
 import json
 import re
 from groq import Groq
@@ -101,7 +102,6 @@ SCRIPT / TOPIC:
 {script_text}
 
 Return ONLY a JSON object with these exact keys:
-- "title": a punchy, viral 3 to 4 word title in UPPERCASE (e.g. "THE COSMIC ODYSSEY BEGINS")
 - "topic": the single main subject (e.g. "Mars", "Personal Finance", "Ancient Rome", "Ocean Deep")
 - "purpose": one of ["educational", "promotional", "storytelling", "news", "motivational", "entertainment"]
 - "tone": one or two words (e.g. "serious and awe-inspiring", "fun and energetic")
@@ -112,10 +112,7 @@ Return ONLY a JSON object with these exact keys:
 """
     try:
         brief = _call_groq_json(client, prompt)
-        if not brief.get("title"):
-            words = brief.get("topic", "PIXELAB DOCUMENTARY").split()
-            brief["title"] = " ".join(words[:4]).upper()
-        safe_print(f"📋 Video Brief Generated — Title: '{brief.get('title')}' | Topic: '{brief.get('topic')}' | Purpose: '{brief.get('purpose')}'")
+        safe_print(f"📋 Video Brief Generated — Topic: '{brief.get('topic')}' | Purpose: '{brief.get('purpose')}'")
         return brief
     except Exception as e:
         safe_print(f"⚠️ Video Brief fallback due to error: {e}")
@@ -336,8 +333,7 @@ def analyze_transcript(scenes: list, api_key: str, tone: str = "Cinematic & Epic
         llm_scenes = parsed.get("scenes", [])
 
         # Store intro / outro in brief / scene meta if present
-        title_3_4_words = brief.get("title") or topic.upper() or "PIXELAB DOCUMENTARY"
-        brief["intro"] = parsed.get("intro", {"title": title_3_4_words, "subtitle": "DOCUMENTARY SHORT"})
+        brief["intro"] = parsed.get("intro", {"title": topic.upper(), "subtitle": "DOCUMENTARY SHORT"})
         brief["outro"] = parsed.get("outro", {"thanks_text": "THANKS FOR WATCHING", "cta_text": "LIKE & SUBSCRIBE FOR MORE"})
 
         for i, sc in enumerate(scenes):
@@ -391,3 +387,73 @@ def analyze_transcript(scenes: list, api_key: str, tone: str = "Cinematic & Epic
             sc["chapter_title"] = "OVERVIEW"
             sc["show_chapter"] = False
         return scenes
+
+
+def extract_title_and_facts(script_text: str, api_key: str = None) -> dict:
+    """
+    AI Director script reviewer:
+      1. Extracts 1 punchy high-CTR title + 2 backup titles.
+      2. Extracts 3 to 8 traceable facts with confidence tags & source snippets.
+    Returns schema:
+      {
+        "title": "...",
+        "title_alt": ["...", "..."],
+        "facts": [...]
+      }
+    """
+    api_key = api_key or os.environ.get("GROQ_API_KEY")
+    if not api_key:
+        # Fallback extract without API key
+        lines = [line.strip() for line in script_text.splitlines() if line.strip()]
+        first_line = lines[0] if lines else "PIXELAB DOCUMENTARY"
+        return {
+            "title": first_line[:55].title(),
+            "title_alt": [first_line[:45].title(), "Inside The Story"],
+            "facts": [
+                {
+                    "text": first_line[:60],
+                    "confidence": "high",
+                    "category": "claim",
+                    "source_snippet": first_line
+                }
+            ]
+        }
+
+    system_instruction = (
+        "You are an AI Video Director reviewing a voiceover script before production. You have two jobs:\n\n"
+        "1. TITLE EXTRACTION\n"
+        "- Write ONE punchy, high-CTR video title, max 60 characters.\n"
+        "- Must accurately represent actual script content without clickbait overstatement.\n"
+        "- Plain English, Title Case.\n"
+        "- Provide 2 backup title alternatives in 'title_alt'.\n\n"
+        "2. FACT & INFORMATION EXTRACTION\n"
+        "- Pull out 3 to 8 standalone facts or key pieces of information actually stated in the script.\n"
+        "- Each fact must be directly traceable to script text (never invent facts).\n"
+        "- Self-contained under 20 words.\n"
+        "- Include exact source sentence(s) in 'source_snippet'.\n"
+        "- Tag each fact with 'confidence' ('high'|'medium'|'low') and 'category' ('statistic'|'definition'|'claim'|'quote'|'timeline'|'other').\n\n"
+        "Return ONLY a JSON object with schema:\n"
+        "{\n"
+        '  "title": "string",\n'
+        '  "title_alt": ["string", "string"],\n'
+        '  "facts": [\n'
+        "    {\n"
+        '      "text": "string",\n'
+        '      "confidence": "high | medium | low",\n'
+        '      "category": "statistic | definition | claim | quote | timeline | other",\n'
+        '      "source_snippet": "string"\n'
+        "    }\n"
+        "  ]\n"
+        "}"
+    )
+
+    client = Groq(api_key=api_key)
+    try:
+        return _call_groq_json(client, f"Script:\n{script_text}", system_prompt=system_instruction)
+    except Exception as e:
+        safe_print(f"extract_title_and_facts notice: {e}")
+        return {
+            "title": "AI Documentary Story",
+            "title_alt": ["Uncovering The Truth", "Inside The Journey"],
+            "facts": []
+        }
