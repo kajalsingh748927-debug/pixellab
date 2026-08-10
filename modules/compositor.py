@@ -144,6 +144,11 @@ def build_master_video_from_audio(
             "emphasis_words":   sc.get("emphasis_words", []),
             "map_location":     sc.get("map_location"),
             "fact_card":        sc.get("fact_card"),
+            "intro":            sc.get("intro"),
+            "outro":            sc.get("outro"),
+            "chapter_title":    sc.get("chapter_title"),
+            "start_sec":        sc.get("start_sec", 0.0),
+            "end_sec":          sc.get("end_sec", 0.0),
             "query":            sc.get("search_query", ""),
             "audio_status":     "✅ Uploaded Audio",
             "video_status":     "⏳ Pending",
@@ -300,14 +305,6 @@ def build_master_video_from_audio(
             def chapter_filter(get_frame, t, _ch=chapter, _cfg=config):
                 return apply_chapter_overlay(get_frame(t), t, _ch, _cfg)
             clip = clip.transform(chapter_filter)
-
-        # ── Kinetic Info Graphic / Data Callout Overlay ────────────────────────
-        if sc.get("fact_card"):
-            from modules.title_overlay import apply_fact_callout_overlay
-            fc_data = sc["fact_card"]
-            def fact_filter(get_frame, t, _fc=fc_data, _cfg=config):
-                return apply_fact_callout_overlay(get_frame(t), t, _fc, _cfg)
-            clip = clip.transform(fact_filter)
 
         # ── Outro CTA Overlay (On Last Scene) ─────────────────────────────────
         if idx == total_scenes and config.get("show_outro", True):

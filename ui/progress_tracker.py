@@ -135,23 +135,16 @@ class ProgressTracker:
 
     def _render_scene_table(self, scene_states):
         with self.tracker_ph.container():
-            st.markdown("### 📊 Phase 1 Scene Breakdown & Kinetic Data Callout Dashboard")
+            st.markdown("### 📊 Scene-by-Scene Progress")
             for s in scene_states:
                 icon     = s["overall"].split()[0] if s["overall"] else "⏳"
                 is_open  = any(
                     kw in s["overall"]
                     for kw in ("In Progress", "Generating", "Downloading")
                 )
-
-                start_sec = s.get("start_sec", 0.0)
-                end_sec = s.get("end_sec", 3.5)
-                dur = max(0.5, end_sec - start_sec)
-                time_str = f"({start_sec:.1f}s – {end_sec:.1f}s, {dur:.1f}s)"
-
-                title_str = s.get("chapter_title") or f"PART {s['index']} OVERVIEW"
-
                 header = (
-                    f"{icon} Scene {s['index']} {time_str} | 📌 {title_str} — {s['overall']}"
+                    f"{icon} Scene {s['index']}: "
+                    f"\"{s['narration'][:55]}...\" — {s['overall']}"
                 )
                 with st.expander(header, expanded=is_open):
                     c_thumb, c_details = st.columns([1, 3])
@@ -166,13 +159,28 @@ class ProgressTracker:
                         cb.write(f"🎥 **Video**  \n{s['video_status']}")
                         cc.write(f"🎨 **VFX**    \n{s['vfx_status']}")
 
-                        st.write(f"📜 **Narration:** *\"{s['narration']}\"*")
-                        st.caption(f"🔍 **Stock query:** `{s['query']}`")
+                        st.markdown("<hr style='margin:6px 0px; border-color:#444;'/>", unsafe_allow_html=True)
+                        st.markdown("##### 🤖 Real-Time AI Extracted Metadata")
 
-                        fc = s.get("fact_card")
-                        if fc and isinstance(fc, dict):
-                            st.info(f"📊 **Kinetic Data Callout (Peak {fc.get('peak_time', 'midway')}):** `{fc.get('label', 'STAT')}: {fc.get('value', '')}`")
+                        # 1. Title Overlay Info
+                        if s.get("intro"):
+                            title_txt = s["intro"].get("title", "")
+                            st.markdown(f"🎬 **Intro Title Overlaid:** `{title_txt}`")
+                        elif s.get("chapter_title"):
+                            st.markdown(f"📑 **Chapter Title Overlaid:** `{s['chapter_title']}`")
+                        elif s.get("outro"):
+                            st.markdown(f"🔔 **Outro CTA Overlaid:** `{s['outro'].get('cta_text', '')}`")
 
+                        # 2. Fact Card Info
+                        if s.get("fact_card"):
+                            fc = s["fact_card"]
+                            f_val = fc.get("stat_value", fc.get("fact_text", ""))
+                            st.markdown(f"📊 **Extracted Fact Overlay:** `{f_val}` (🟢 HIGH CONFIDENCE)")
+
+                        # 3. Stock Visual Query & Sync
+                        dur = s.get("end_sec", 0.0) - s.get("start_sec", 0.0)
+                        st.caption(f"🔍 **Visual Search Query:** `{s['query']}`")
+                        st.caption(f"⏱️ **Duration:** `{s.get('start_sec', 0.0):.1f}s – {s.get('end_sec', 0.0):.1f}s` ({dur:.1f}s total)")
                         if s.get("word_ts"):
-                            st.caption(f"⚡ **Word Sync:** {len(s['word_ts'])} timestamps aligned")
+                            st.caption(f"⚡ **Word Sync:** {len(s['word_ts'])} spoken words aligned")
 

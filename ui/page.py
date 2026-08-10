@@ -369,6 +369,22 @@ def render_page(sidebar_data: dict, api_keys: dict, keys_ready: bool):
         video_brief=video_brief,
     )
 
+    # Attach extracted Intro Title & Facts to scenes for real-time tracking display
+    if scenes:
+        override_title = video_config.get("intro_title_override") or full_text[:40]
+        scenes[0]["intro"] = {"title": override_title, "style": video_config.get("preset_name", "🎬 Cinematic Warm")}
+        
+        # Attach approved facts to subsequent scenes
+        facts_list = review_data.get("facts", []) if 'review_data' in locals() else []
+        for idx, fact in enumerate(facts_list):
+            scene_idx = idx + 1
+            if scene_idx < len(scenes):
+                scenes[scene_idx]["fact_card"] = {
+                    "stat_value": fact.get("text", ""),
+                    "label": fact.get("category", "FACT").upper(),
+                    "confidence": fact.get("confidence", "high")
+                }
+
     progress_bar.progress(0.28)
     status_box.success(
         f"✅ Ready! {len(scenes)} scenes | {total_duration:.1f}s audio | "
