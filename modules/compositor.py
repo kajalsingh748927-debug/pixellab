@@ -208,7 +208,7 @@ def concatenate_audio_files(audio_files, output_path):
             )
             master_video_clip = master_video_clip.with_audio(final_audio)
             mixed_wav_path = os.path.join(TEMP_DIR, "mixed_5layer_master.wav")
-            final_audio.write_audiofile(mixed_wav_path, fps=44100, logger=None)
+            final_audio.write_audiofile(mixed_wav_path, fps=44100, logger="bar")
             if os.path.exists(mixed_wav_path) and os.path.getsize(mixed_wav_path) > 1000:
                 final_audio_path_to_mux = mixed_wav_path
             safe_print("  ✅ 5-layer master audio track mixed & rendered.")
@@ -229,7 +229,7 @@ def concatenate_audio_files(audio_files, output_path):
         ffmpeg_params=ffmpeg_params,
         temp_audiofile=temp_audio_path,
         remove_temp=True,
-        logger=None,
+        logger="bar",
     )
     if codec == "libx264":
         master_write_kwargs["preset"] = DEFAULT_PRESET
@@ -529,13 +529,15 @@ def build_master_video_from_audio(
             fps=FPS,
             bitrate=DEFAULT_BITRATE,
             ffmpeg_params=ffmpeg_params,
-            logger=None,
+            logger="bar",
         )
         if codec == "libx264":
             write_kwargs["preset"] = DEFAULT_PRESET
 
         clip.write_videofile(chunk_file, **write_kwargs)
         clip.close()
+        del clip
+        import gc; gc.collect()
         processed_clips.append(chunk_file)
 
         # Create a silent placeholder clip of correct duration for SFX boundary timing
@@ -689,7 +691,7 @@ def build_master_video_from_audio(
         ffmpeg_params=ffmpeg_params,
         temp_audiofile=temp_audio_path,
         remove_temp=True,
-        logger=None,
+        logger="bar",
     )
     if codec == "libx264":
         master_write_kwargs["preset"] = DEFAULT_PRESET
