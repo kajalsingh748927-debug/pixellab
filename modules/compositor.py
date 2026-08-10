@@ -581,7 +581,8 @@ def build_master_video_from_audio(
     trans_dur    = config.get("transition_duration", 0.35)
     expected_total_duration = sum(sc.get("end_sec", 10.0) - sc.get("start_sec", 0.0) for sc in scenes)
 
-    master_video_clip = None
+    unmuxed_video_path = os.path.join(TEMP_DIR, "unmuxed_master.mp4")
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
 
     if enable_trans and len(processed_clips) > 1:
         t_start_trans = time.time()
@@ -601,12 +602,28 @@ def build_master_video_from_audio(
                 trans_log.append(f"Scene {idx}➔{idx+1}: {chosen_trans}")
                 cur_clip = apply_transition(cur_clip, next_clip, chosen_trans, duration=trans_dur)
 
-            master_video_clip = cur_clip
             t_trans = time.time() - t_start_trans
             safe_print(f"  ✅ Transitions completed in {t_trans:.2f}s: {', '.join(trans_log)}")
 
-    if master_video_clip is None:
-        # Stream-copy fast path (when enable_transitions=False)
+            master_write_kwargs = dict(
+                codec=codec,
+                audio=False,
+                fps=FPS,
+                bitrate=DEFAULT_BITRATE,
+                ffmpeg_params=ffmpeg_params,
+                logger="bar",
+            )
+            if codec == "libx264":
+                master_write_kwargs["preset"] = DEFAULT_PRESET
+
+            cur_clip.write_videofile(unmuxed_video_path, **master_write_kwargs)
+            cur_clip.close()
+            for c in loaded_clips:
+                try: c.close()
+                except: pass
+
+    if not os.path.exists(unmuxed_video_path):
+        # Stream-copy fast path (when transitions are disabled or fail)
         update_and_notify(84, f"⚡ Joining {len(processed_clips)} scene video chunks (fast stream copy)...")
         concat_list_path = os.path.join(TEMP_DIR, "video_concat_list.txt")
         with open(concat_list_path, "w", encoding="utf-8") as f:
@@ -614,8 +631,6 @@ def build_master_video_from_audio(
                 escaped = cfile.replace("\\", "/").replace("'", "\\'")
                 f.write(f"file '{escaped}'\n")
 
-        unmuxed_video_path = os.path.join(TEMP_DIR, "unmuxed_master.mp4")
-        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
         concat_cmd = [
             ffmpeg_exe, "-y",
             "-f", "concat", "-safe", "0",
@@ -625,89 +640,58 @@ def build_master_video_from_audio(
         ]
         subprocess.run(concat_cmd, capture_output=True, timeout=120)
 
-        use_stream_copy = False
-        if unmuxed_video_path and os.path.exists(unmuxed_video_path):
-            try:
-                m_clip = VideoFileClip(unmuxed_video_path)
-                if abs(m_clip.duration - expected_total_duration) <= 1.0 and len(processed_clips) > 0:
-                    master_video_clip = m_clip
-                    use_stream_copy = True
-                    safe_print(f"  ✅ FFmpeg stream concat successfully joined all {len(processed_clips)} clips ({m_clip.duration:.1f}s).")
-                else:
-                    safe_print(f"⚠️ FFmpeg concat joined only {m_clip.duration:.1f}s out of expected {expected_total_duration:.1f}s — joining ALL {len(processed_clips)} scene clips with MoviePy compose...")
-                    m_clip.close()
-            except Exception as mc_err:
-                safe_print(f"⚠️ Master clip load error: {mc_err} — falling back to MoviePy compose.")
-
-        if not use_stream_copy:
-            loaded_clips = [VideoFileClip(c) for c in processed_clips if os.path.exists(c)]
-            master_video_clip = concatenate_videoclips(loaded_clips, method="compose")
-            safe_print(f"  ✅ MoviePy compose joined all {len(loaded_clips)} scene clips ({master_video_clip.duration:.1f}s).")
-
-    # ── Mux uploaded audio + optional background music ─────────────────────────
-    update_and_notify(88, "🎤 Muxing uploaded audio + background music into final video...")
-    try:
-        final_audio = mix_master_audio(
-            audio_clips_for_mixing,
-            master_video_clip.duration,
-            config,
-            uploaded_audio_path=uploaded_audio_path,
-            scenes=scenes,
+    if not os.path.exists(unmuxed_video_path):
+        # Fallback MoviePy concat
+        loaded_clips = [VideoFileClip(c) for c in processed_clips if os.path.exists(c)]
+        comp = concatenate_videoclips(loaded_clips, method="compose")
+        master_write_kwargs = dict(
+            codec=codec,
+            audio=False,
+            fps=FPS,
+            bitrate=DEFAULT_BITRATE,
+            ffmpeg_params=ffmpeg_params,
+            logger="bar",
         )
-        master_video_clip = master_video_clip.with_audio(final_audio)
-        safe_print("  ✅ Uploaded audio + music track multiplexed.")
-    except Exception as ae:
-        safe_print(f"  ⚠️ Audio mix notice: {ae} — trying direct audio mux...")
-        # Direct FFmpeg fallback — mux uploaded audio directly without music
-        try:
-            direct_out = final_output_path.replace(".mp4", "_direct.mp4")
-            mux_cmd = [
-                ffmpeg_exe, "-y",
-                "-i", unmuxed_video_path if os.path.exists(unmuxed_video_path) else processed_clips[0],
-                "-i", uploaded_audio_path,
-                "-c:v", "copy", "-c:a", "aac",
-                "-shortest", direct_out,
-            ]
-            result = subprocess.run(mux_cmd, capture_output=True, timeout=180)
-            if os.path.exists(direct_out):
-                shutil.move(direct_out, final_output_path)
-                total_time = time.time() - start_time
-                safe_print(f"\n🎉 Done (direct mux fallback): {final_output_path} ({fmt_time(total_time)})")
-                update_and_notify(
-                    100,
-                    f"🎉 Video complete! | ✅ {scenes_done}/{total_scenes} scenes | ⏱️ {fmt_time(total_time)}"
-                )
-                return True
-        except Exception as direct_err:
-            safe_print(f"  ❌ Direct mux also failed: {direct_err}")
+        if codec == "libx264":
+            master_write_kwargs["preset"] = DEFAULT_PRESET
+        comp.write_videofile(unmuxed_video_path, **master_write_kwargs)
+        comp.close()
 
-    # ── Final write ────────────────────────────────────────────────────────────
-    temp_audio_path = os.path.join(TEMP_DIR, "temp-audio.m4a")
-    master_write_kwargs = dict(
-        codec=codec,
-        audio_codec="aac",
-        fps=FPS,
-        bitrate=DEFAULT_BITRATE,
-        ffmpeg_params=ffmpeg_params,
-        temp_audiofile=temp_audio_path,
-        remove_temp=True,
-        logger="bar",
-    )
-    if codec == "libx264":
-        master_write_kwargs["preset"] = DEFAULT_PRESET
+    # ── Mux uploaded audio directly into final video ─────────────────────────
+    update_and_notify(90, "🎤 Attaching uploaded audio directly to edited video...")
+    safe_print("🎤 Attaching uploaded audio directly to edited video (zero audio mixing)...")
 
-    master_video_clip.write_videofile(final_output_path, **master_write_kwargs)
+    mux_cmd = [
+        ffmpeg_exe, "-y",
+        "-i", unmuxed_video_path,
+        "-i", uploaded_audio_path,
+        "-c:v", "copy",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-shortest",
+        final_output_path,
+    ]
+
+    safe_print("⚡ Running direct FFmpeg audio-video mux...")
+    res = subprocess.run(mux_cmd, capture_output=True, timeout=180)
+
+    if not os.path.exists(final_output_path) or os.path.getsize(final_output_path) < 10000:
+        safe_print(f"⚠️ FFmpeg stream copy mux notice — attempting re-encode mux...")
+        mux_cmd_re = [
+            ffmpeg_exe, "-y",
+            "-i", unmuxed_video_path,
+            "-i", uploaded_audio_path,
+            "-c:v", "libx264",
+            "-c:a", "aac",
+            "-shortest",
+            final_output_path,
+        ]
+        subprocess.run(mux_cmd_re, capture_output=True, timeout=180)
 
     total_time = time.time() - start_time
     safe_print(f"\n🎉 Done: {final_output_path}  (Total time: {fmt_time(total_time)})")
 
     # ── Cleanup ────────────────────────────────────────────────────────────────
-    for a in audio_clips_for_mixing:
-        try: a.close()
-        except: pass
-    try: master_video_clip.close()
-    except: pass
-
     if os.path.exists(TEMP_DIR):
         for item in os.listdir(TEMP_DIR):
             p = os.path.join(TEMP_DIR, item)
@@ -721,4 +705,4 @@ def build_master_video_from_audio(
         f"✅ {scenes_done}/{total_scenes} scenes rendered | "
         f"⏱️ Total time: {fmt_time(total_time)}"
     )
-    return True
+    return True

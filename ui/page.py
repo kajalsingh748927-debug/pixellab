@@ -234,24 +234,20 @@ def render_page(sidebar_data: dict, api_keys: dict, keys_ready: bool):
         return
 
     # ── Transcription ──────────────────────────────────────────────────
-    tracker = ProgressTracker(scene_count)
-
-    st.subheader("📡 Live Generation & Render Tracker")
-    progress_bar = st.progress(0.0)
-
-    # ── DEBUG: Show API key & audio file status ────────────────────────
+    # ── Show API key & audio status ────────────────────────────────────
     groq_key    = api_keys.get("GROQ_API_KEY", "") or os.environ.get("GROQ_API_KEY", "")
     el_key      = api_keys.get("ELEVENLABS_API_KEY", "") or os.environ.get("ELEVENLABS_API_KEY", "")
     audio_exists = os.path.exists(audio_path)
     audio_size   = os.path.getsize(audio_path) if audio_exists else 0
 
-    with st.expander("🔧 Debug Info (transcription)", expanded=True):
+    with st.expander("🔧 Debug Info (transcription)", expanded=False):
         st.write(f"🔑 GROQ_API_KEY set: `{'✅ Yes' if groq_key else '❌ NO — this is the problem!'}`")
         st.write(f"🔑 ELEVENLABS_API_KEY set: `{'✅ Yes' if el_key else '❌ No'}`")
         st.write(f"🎵 Audio saved to disk: `{'✅ Yes' if audio_exists else '❌ NO'}`")
         st.write(f"📦 Audio file size: `{audio_size/1024:.1f} KB`")
         st.write(f"📁 Audio path: `{audio_path}`")
 
+    progress_bar = st.progress(0.0)
     status_box = st.info("🎙️ Step 1/4 — Transcribing your audio with Groq Whisper...")
 
     with st.spinner("🔍 Transcribing audio... (may take 10–60s for large files)"):
