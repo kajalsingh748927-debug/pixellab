@@ -1,7 +1,26 @@
+"""
+modules/subtitle_vfx.py
+─────────────────────────────────────────────────────────────────────────────
+Professional Kinetic Subtitle & Master VFX Pipeline Engine for Pixelab.
+
+Provides pixel-accurate frame rendering using PIL (Pillow) & OpenCV:
+  • 10 Preset Typography Packages & Manual Custom Overrides
+  • Pixel-Accurate Positioning (Bottom, Lower Third, Center, Upper Third, Top, Custom Y%)
+  • 5 Text Layout Modes (Single Line, Two Lines, Word-by-Word, Three Words, Full Sentence)
+  • 9 Active-Word Animations (scale_pop, bounce, shake, glow, karaoke_fill, typewriter, fade_in_word, tilt, none)
+  • 6 Background Styles (none, full_width_bar, pill, word_box, shadow_only, gradient_bar)
+  • 4 Stroke Styles (solid, double, glitch, none)
+  • Layered Gaussian Glow & Drop Shadow System
+  • Custom Letter Spacing (char-by-char advance math)
+  • Pro VFX Pipeline (Color Grade, Vignette, Grain, Transitions, Letterbox, Fact Cards)
+─────────────────────────────────────────────────────────────────────────────
+"""
 import os
 import cv2
+import math
+import random
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 from modules.pro_vfx import apply_pro_vfx_pipeline
 from modules.subtitle_packages import get_subtitle_package, SUBTITLE_PACKAGES
@@ -19,180 +38,12 @@ EMOJI_MAP = {
     "win": "🏆", "winner": "🏆", "trophy": "🏆", "goal": "🎯", "target": "🎯",
 }
 
-def get_word_emoji(word):
+def get_word_emoji(word: str) -> str:
     clean = "".join(c for c in word.lower() if c.isalnum())
     return EMOJI_MAP.get(clean, "")
 
 
-# ── COLOR GRADE PRESETS ─────────────────────────────────────
-def apply_color_grade(frame, config):
-    grade = config.get("color_grade", "None")
-    sat   = config.get("saturation", 1.0)
-    alpha = config.get("contrast", 1.05)
-    beta  = config.get("brightness", 2)
-
-    # Base brightness/contrast
-    frame = cv2.convertScaleAbs(frame, alpha=alpha, beta=beta)
-
-    # Saturation via HSV
-    if sat != 1.0:
-        hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV).astype(np.float32)
-        hsv[:, :, 1] = np.clip(hsv[:, :, 1] * sat, 0, 255)
-        frame = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2RGB)
-
-    # Grade presets
-    if grade == "Cinematic Teal & Orange":
-        lut = np.arange(256, dtype=np.float32)
-        r = np.clip(lut * 1.1 + 10, 0, 255).astype(np.uint8)
-        g = np.clip(lut * 0.95, 0, 255).astype(np.uint8)
-        b = np.clip(lut * 0.85, 0, 255).astype(np.uint8)
-        frame[:, :, 0] = cv2.LUT(frame[:, :, 0], r)
-        frame[:, :, 1] = cv2.LUT(frame[:, :, 1], g)
-        frame[:, :, 2] = cv2.LUT(frame[:, :, 2], b)
-
-    elif grade == "Warm Sunset":
-        lut = np.arange(256, dtype=np.float32)
-        r = np.clip(lut * 1.15 + 15, 0, 255).astype(np.uint8)
-        b = np.clip(lut * 0.80, 0, 255).astype(np.uint8)
-        frame[:, :, 0] = cv2.LUT(frame[:, :, 0], r)
-        frame[:, :, 2] = cv2.LUT(frame[:, :, 2], b)
-
-    elif grade == "Cold Blue Steel":
-        lut = np.arange(256, dtype=np.float32)
-        r = np.clip(lut * 0.82, 0, 255).astype(np.uint8)
-        b = np.clip(lut * 1.20 + 10, 0, 255).astype(np.uint8)
-        frame[:, :, 0] = cv2.LUT(frame[:, :, 0], r)
-        frame[:, :, 2] = cv2.LUT(frame[:, :, 2], b)
-
-    elif grade == "Vintage Film":
-        lut = np.arange(256, dtype=np.float32)
-        r = np.clip(lut * 1.08 + 8, 0, 255).astype(np.uint8)
-        g = np.clip(lut * 1.02 + 5, 0, 255).astype(np.uint8)
-        b = np.clip(lut * 0.78 + 20, 0, 255).astype(np.uint8)
-        frame[:, :, 0] = cv2.LUT(frame[:, :, 0], r)
-        frame[:, :, 1] = cv2.LUT(frame[:, :, 1], g)
-        frame[:, :, 2] = cv2.LUT(frame[:, :, 2], b)
-
-    elif grade == "High Contrast B&W":
-        gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
-        gray = cv2.convertScaleAbs(gray, alpha=1.3, beta=-20)
-        frame = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
-
-    elif grade == "Moody Dark":
-        frame = cv2.convertScaleAbs(frame, alpha=0.80, beta=-15)
-
-    elif grade == "Vibrant Pop":
-        hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV).astype(np.float32)
-        hsv[:, :, 1] = np.clip(hsv[:, :, 1] * 1.5, 0, 255)
-        frame = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2RGB)
-        frame = cv2.convertScaleAbs(frame, alpha=1.1, beta=5)
-
-    elif grade == "Golden Hour":
-        lut = np.arange(256, dtype=np.float32)
-        r = np.clip(lut * 1.20 + 20, 0, 255).astype(np.uint8)
-        g = np.clip(lut * 1.05 + 5, 0, 255).astype(np.uint8)
-        b = np.clip(lut * 0.70, 0, 255).astype(np.uint8)
-        frame[:, :, 0] = cv2.LUT(frame[:, :, 0], r)
-        frame[:, :, 1] = cv2.LUT(frame[:, :, 1], g)
-        frame[:, :, 2] = cv2.LUT(frame[:, :, 2], b)
-
-    return frame
-
-
-# ── VIGNETTE ───────────────────────────────────────────────
-def apply_vignette(frame, strength):
-    if strength <= 0:
-        return frame
-    h, w = frame.shape[:2]
-    Y, X = np.ogrid[:h, :w]
-    cx, cy = w / 2, h / 2
-    dist = np.sqrt(((X - cx) / cx) ** 2 + ((Y - cy) / cy) ** 2)
-    mask = 1 - np.clip(dist * strength, 0, 1)
-    mask = mask[:, :, np.newaxis]
-    return np.clip(frame * mask, 0, 255).astype(np.uint8)
-
-
-# ── FILM GRAIN ─────────────────────────────────────────────
-def apply_grain(frame, intensity):
-    if intensity <= 0:
-        return frame
-    noise = np.random.normal(0, intensity * 25, frame.shape).astype(np.int16)
-    return np.clip(frame.astype(np.int16) + noise, 0, 255).astype(np.uint8)
-
-
-# ── CINEMATIC TRANSITIONS & OVERLAYS ─────────────────────────
-def apply_whip_zoom(frame, t, duration, fade_dur=0.30):
-    """Whip Zoom motion blur on scene entrance."""
-    if t < fade_dur:
-        progress = 1.0 - (t / fade_dur)
-        scale = 1.0 + 0.16 * progress
-        h, w = frame.shape[:2]
-        nw, nh = int(w * scale), int(h * scale)
-        resized = cv2.resize(frame, (nw, nh))
-        dx, dy = (nw - w) // 2, (nh - h) // 2
-        crop = resized[max(0, dy):max(0, dy)+h, max(0, dx):max(0, dx)+w]
-        if crop.shape[:2] != (h, w):
-            crop = cv2.resize(crop, (w, h))
-        blur_k = max(1, int(15 * progress)) | 1
-        return cv2.GaussianBlur(crop, (blur_k, blur_k), 0)
-    return frame
-
-def apply_glitch_vfx(frame, t, duration, glitch_dur=0.25):
-    """RGB split digital glitch effect on scene entrance."""
-    if t < glitch_dur:
-        shift = max(1, int(16 * (1.0 - t / glitch_dur)))
-        h, w = frame.shape[:2]
-        glitch = frame.copy()
-        glitch[:, shift:, 0] = frame[:, :-shift, 0]  # Red channel shift
-        glitch[:, :-shift, 2] = frame[:, shift:, 2]  # Blue channel shift
-        return glitch
-    return frame
-
-def apply_light_leak(frame, t, duration):
-    """Anamorphic optical lens flare & warm light leak overlay."""
-    progress = t / max(duration, 0.1)
-    if 0.10 < progress < 0.50:
-        alpha = np.sin(np.pi * (progress - 0.10) / 0.40) * 0.28
-        h, w = frame.shape[:2]
-        flare = np.zeros((h, w, 3), dtype=np.float32)
-        Y, X = np.ogrid[:h, :w]
-        dist = np.sqrt(((X - w * 0.85) / w) ** 2 + ((Y - h * 0.15) / h) ** 2)
-        flare[:, :, 0] = np.clip(1.0 - dist * 1.4, 0, 1) * 255  # Red
-        flare[:, :, 1] = np.clip(1.0 - dist * 1.8, 0, 1) * 170  # Green
-        flare[:, :, 2] = np.clip(1.0 - dist * 2.5, 0, 1) * 50   # Blue
-        return cv2.addWeighted(frame, 1.0, flare.astype(np.uint8), alpha, 0)
-    return frame
-
-
-# ── LETTERBOX ──────────────────────────────────────────────
-def apply_letterbox(frame, ratio_str):
-    h, w = frame.shape[:2]
-    ratio_map = {
-        "2.35:1 (Anamorphic)": 2.35,
-        "2.39:1 (Ultra Scope)": 2.39,
-        "1.85:1 (Flat)": 1.85,
-    }
-    ratio = ratio_map.get(ratio_str, 2.35)
-    bar_h = int((h - (w / ratio)) / 2)
-    if bar_h > 0:
-        frame[:bar_h, :] = 0
-        frame[h - bar_h:, :] = 0
-    return frame
-
-
-# ── SUBTITLE COLOR STYLES ──────────────────────────────────
-SUBTITLE_STYLES = {
-    "Kinetic Yellow":   {"active": (255, 235, 59),  "inactive": (255, 255, 255), "stroke": (0, 0, 0),       "stroke_active": None},
-    "Cyberpunk Neon":   {"active": (0, 255, 255),   "inactive": (255, 255, 255), "stroke": (0, 0, 0),       "stroke_active": (255, 0, 128)},
-    "Clean Classic":    {"active": (255, 255, 255),  "inactive": (255, 255, 255), "stroke": (0, 0, 0),       "stroke_active": None},
-    "Boxed Background": {"active": (255, 235, 59),   "inactive": (255, 255, 255), "stroke": (0, 0, 0),       "stroke_active": None},
-    "Fire Red":         {"active": (255, 60, 30),    "inactive": (255, 220, 200), "stroke": (80, 0, 0),      "stroke_active": None},
-    "Instagram White":  {"active": (255, 255, 255),  "inactive": (200, 200, 200), "stroke": (0, 0, 0),       "stroke_active": None},
-    "MrBeast Bold":     {"active": (255, 220, 0),    "inactive": (255, 255, 255), "stroke": (0, 0, 0),       "stroke_active": (200, 0, 0)},
-    "Gradient Rainbow": {"active": (255, 100, 255),  "inactive": (255, 255, 255), "stroke": (0, 0, 0),       "stroke_active": None},
-    "Minimal Fade":     {"active": (255, 255, 255),  "inactive": (180, 180, 180), "stroke": (30, 30, 30),    "stroke_active": None},
-}
-
+# ── FONT RESOLUTION ─────────────────────────────────────────
 FONT_MAP = {
     "💥 Impact (Heavy Viral Bold)": "C:/Windows/Fonts/impact.ttf",
     "🅰️ Arial Black (Modern Bold)": "C:/Windows/Fonts/arialbd.ttf",
@@ -206,6 +57,9 @@ FONT_MAP = {
     "📱 Segoe UI (Modern UI)": "C:/Windows/Fonts/segoeuib.ttf",
     "🍿 DejaVu Sans Bold (Default)": "DejaVuSans-Bold.ttf",
     "DejaVuSans-Bold.ttf": "DejaVuSans-Bold.ttf",
+    "DejaVuSansMono-Bold.ttf": "DejaVuSansMono-Bold.ttf",
+    "DejaVuSerif-Bold.ttf": "DejaVuSerif-Bold.ttf",
+    "DejaVuSans.ttf": "DejaVuSans.ttf",
 }
 
 def resolve_font_path(font_name: str) -> str:
@@ -215,22 +69,56 @@ def resolve_font_path(font_name: str) -> str:
         return font_name
     return "DejaVuSans-Bold.ttf"
 
-SIZE_MAP = {
-    "Tiny": 0.025, "Small": 0.038, "Medium": 0.055,
-    "Large": 0.072, "Extra Large": 0.090, "Massive": 0.115
-}
 
-POS_MAP = {
-    "Bottom": 0.83, "Lower Center": 0.72, "Center": 0.47,
-    "Upper Center": 0.28, "Top": 0.10
-}
+# ── COLOR & VALUE UTILS ─────────────────────────────────────
+def hex_to_rgb(hex_str: str) -> tuple:
+    if not hex_str:
+        return (255, 255, 255)
+    hex_str = hex_str.lstrip("#")
+    try:
+        if len(hex_str) == 6:
+            return tuple(int(hex_str[i:i+2], 16) for i in (0, 2, 4))
+    except Exception:
+        pass
+    return (255, 255, 255)
 
 
+# ── LETTER-SPACING DRAW HELPER ──────────────────────────────
+def measure_text_with_spacing(draw, text, font, letter_spacing=0):
+    if not text:
+        return 0, 0
+    if letter_spacing <= 0:
+        bbox = draw.textbbox((0, 0), text, font=font)
+        return bbox[2] - bbox[0], bbox[3] - bbox[1]
+    
+    total_w = 0
+    max_h = 0
+    for char in text:
+        bbox = draw.textbbox((0, 0), char, font=font)
+        cw = bbox[2] - bbox[0]
+        ch = bbox[3] - bbox[1]
+        total_w += cw + letter_spacing
+        if ch > max_h:
+            max_h = ch
+    return max(0, total_w - letter_spacing), max_h
+
+
+def draw_text_with_spacing(draw, pos, text, font, fill, letter_spacing=0):
+    x, y = pos
+    if letter_spacing <= 0:
+        draw.text((x, y), text, font=font, fill=fill)
+        return
+    
+    cur_x = x
+    for char in text:
+        draw.text((cur_x, y), char, font=font, fill=fill)
+        bbox = draw.textbbox((0, 0), char, font=font)
+        cw = bbox[2] - bbox[0]
+        cur_x += cw + letter_spacing
+
+
+# ── MASTER SUBTITLE RENDERER ─────────────────────────────────
 def draw_kinetic_subtitles(frame, text, t, duration, config, word_timestamps=None):
-    """
-    Renders kinetic word-by-word highlighted subtitles directly on top of frame.
-    Supports ElevenLabs/Whisper millisecond timestamps or linear fallback.
-    """
     if not text or not text.strip():
         return frame
 
@@ -239,195 +127,340 @@ def draw_kinetic_subtitles(frame, text, t, duration, config, word_timestamps=Non
     if not all_words:
         return frame
 
-    # 1. Determine active word index from word timestamps or time ratio
+    # 1. Determine active word index & sub-word progress ratio
     global_active_idx = 0
+    sub_word_progress = 0.5
+    word_start_t = 0.0
+    word_end_t = duration
+
     if word_timestamps and len(word_timestamps) > 0:
         for idx, wt in enumerate(word_timestamps):
             if wt["start"] <= t <= wt["end"]:
                 global_active_idx = idx
+                word_start_t = wt["start"]
+                word_end_t = wt["end"]
+                dur_w = max(0.05, word_end_t - word_start_t)
+                sub_word_progress = min(max((t - word_start_t) / dur_w, 0.0), 1.0)
                 break
             elif t > wt["end"]:
                 global_active_idx = idx
     else:
         progress = min(max(t / max(duration, 0.1), 0.0), 1.0)
         global_active_idx = min(int(progress * len(all_words)), len(all_words) - 1)
+        sub_word_progress = (progress * len(all_words)) % 1.0
 
+    # 2. Resolve Package or Override Config
     pkg_name = config.get("subtitle_package", "Custom (Manual Controls)")
-    pkg = get_subtitle_package(pkg_name) if pkg_name != "Custom (Manual Controls)" else None
+    pkg = get_subtitle_package(pkg_name) if pkg_name != "Custom (Manual Controls)" else {}
 
-    # Resolve settings from Package or Manual controls
-    active_color   = pkg["active_color"] if pkg else SUBTITLE_STYLES.get(config.get("style", "Kinetic Yellow"), SUBTITLE_STYLES["Kinetic Yellow"])["active"]
-    inactive_color = pkg["inactive_color"] if pkg else SUBTITLE_STYLES.get(config.get("style", "Kinetic Yellow"), SUBTITLE_STYLES["Kinetic Yellow"])["inactive"]
-    stroke_col_def = pkg["stroke_color"] if pkg else SUBTITLE_STYLES.get(config.get("style", "Kinetic Yellow"), SUBTITLE_STYLES["Kinetic Yellow"])["stroke"]
-    stroke_active  = pkg["active_stroke_color"] if pkg else SUBTITLE_STYLES.get(config.get("style", "Kinetic Yellow"), SUBTITLE_STYLES["Kinetic Yellow"]).get("stroke_active")
-    stroke_r       = pkg["stroke_width"] if pkg else max(3, config.get("stroke_width", 5))
-    font_raw       = pkg["font_file"] if pkg else config.get("font", "💥 Impact (Heavy Viral Bold)")
-    font_file      = resolve_font_path(font_raw)
-    pos_key        = pkg["position"] if pkg else config.get("position", "Bottom")
-    size_key       = pkg["size"] if pkg else config.get("size", "Medium")
-    enable_emojis  = pkg["enable_emojis"] if pkg else True
+    # Merge configuration: explicit user config overrides package settings
+    def get_cfg(key, default):
+        if key in config and config[key] is not None:
+            return config[key]
+        return pkg.get(key, default)
 
-    # Resolve background box — default to None (no black box)
-    user_bg_opt = config.get("subtitle_bg_box", "None (Clean Floating Text)")
-    if user_bg_opt == "Dark Pill Box":
-        box_bg = (0, 0, 0, 180)
-        box_border = (255, 255, 255, 100)
-    elif user_bg_opt == "Semi-Transparent Shadow":
-        box_bg = (0, 0, 0, 110)
-        box_border = None
-    else:
-        box_bg = pkg.get("box_bg") if pkg else None
-        box_border = pkg.get("box_border") if pkg else None
+    active_color       = get_cfg("active_color", (255, 235, 59))
+    inactive_color     = get_cfg("inactive_color", (255, 255, 255))
+    stroke_color       = get_cfg("stroke_color", (0, 0, 0))
+    stroke_width       = get_cfg("stroke_width", 5)
+    stroke_style       = get_cfg("stroke_style", "solid")
+    active_stroke_col  = get_cfg("active_stroke_color", None)
+    bg_type            = get_cfg("background_type", "none")
+    bg_color           = get_cfg("bg_color", (0, 0, 0, 160))
+    padding_x          = get_cfg("padding_x", 20)
+    padding_y          = get_cfg("padding_y", 10)
+    animation_type     = get_cfg("animation_type", "scale_pop")
+    font_file_name     = get_cfg("font_file", "DejaVuSans-Bold.ttf")
+    font_path          = resolve_font_path(font_file_name)
+    pos_mode           = get_cfg("position", "Bottom")
+    custom_y_pct       = get_cfg("custom_y_pct", 85)
+    layout_mode        = get_cfg("layout_mode", "Two Lines")
+    size_scale         = get_cfg("size_scale", 1.0)
+    shadow             = get_cfg("shadow", None)
+    glow               = get_cfg("glow", None)
+    letter_spacing     = get_cfg("letter_spacing", 0)
+    enable_emojis      = get_cfg("enable_emojis", True)
+    underline_bar      = get_cfg("underline_bar", False)
+    cursor_blink       = get_cfg("cursor_blink", False)
 
-    chunk_size = pkg["chunk_size"] if pkg else (4 if len(all_words) > 6 else 3)
+    if isinstance(active_color, str) and active_color.startswith("#"):
+        active_color = hex_to_rgb(active_color)
+    if isinstance(inactive_color, str) and inactive_color.startswith("#"):
+        inactive_color = hex_to_rgb(inactive_color)
+    if isinstance(stroke_color, str) and stroke_color.startswith("#"):
+        stroke_color = hex_to_rgb(stroke_color)
+
+    # 3. Positioning Y math
+    POS_PCT_MAP = {
+        "Top": 10, "Upper Third": 25, "Center": 50,
+        "Lower Third": 75, "Bottom": 90, "Custom": custom_y_pct
+    }
+    y_pct = POS_PCT_MAP.get(pos_mode, custom_y_pct)
+    target_y = int(h * (y_pct / 100.0))
+
+    # 4. Text Chunking & Layout Formatting
     total_words = len(all_words)
-
-    # Chunk words into phrases
-    chunks = [all_words[i:i + chunk_size] for i in range(0, total_words, chunk_size)]
     
-    current_chunk_idx = global_active_idx // chunk_size
-    if current_chunk_idx >= len(chunks):
-        current_chunk_idx = len(chunks) - 1
+    if layout_mode == "Word-by-Word":
+        display_words = [all_words[global_active_idx]]
+        local_active_idx = 0
+    elif layout_mode == "Three Words at a Time":
+        start_i = max(0, global_active_idx - 1)
+        end_i = min(total_words, start_i + 3)
+        display_words = all_words[start_i:end_i]
+        local_active_idx = global_active_idx - start_i
+    elif layout_mode == "Full Sentence" or layout_mode == "Single Line":
+        display_words = all_words
+        local_active_idx = global_active_idx
+    else:  # Two Lines (Default)
+        chunk_size = get_cfg("chunk_size", 4)
+        chunks = [all_words[i:i + chunk_size] for i in range(0, total_words, chunk_size)]
+        cur_c_idx = global_active_idx // chunk_size
+        if cur_c_idx >= len(chunks):
+            cur_c_idx = len(chunks) - 1
+        display_words = chunks[cur_c_idx]
+        local_active_idx = global_active_idx % chunk_size
 
-    words = chunks[current_chunk_idx]
-    local_active_idx = global_active_idx % chunk_size
-    if local_active_idx >= len(words):
-        local_active_idx = len(words) - 1
+    # Attach auto-emojis to active word
+    final_words = []
+    for i, w_str in enumerate(display_words):
+        if i == local_active_idx and enable_emojis:
+            emo = get_word_emoji(w_str)
+            final_words.append(f"{w_str} {emo}".strip())
+        else:
+            final_words.append(w_str)
 
-    img  = Image.fromarray(frame)
-    draw = ImageDraw.Draw(img, "RGBA")
-
-    font_size = max(24, int(h * SIZE_MAP.get(size_key, 0.055)))
+    # 5. Base Font Sizing
+    base_font_size = max(24, int(h * 0.055 * size_scale))
     try:
-        font = ImageFont.truetype(font_file, font_size)
-    except IOError:
-        try:
-            font = ImageFont.truetype("DejaVuSans-Bold.ttf", font_size)
-        except IOError:
-            font = ImageFont.load_default()
+        font = ImageFont.truetype(font_path, base_font_size)
+    except Exception:
+        font = ImageFont.load_default()
 
-    start_y = int(h * POS_MAP.get(pos_key, 0.83))
+    # 6. Setup PIL Canvas Overlay
+    base_pil = Image.fromarray(frame).convert("RGBA")
+    overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
 
-    # Add auto-emojis to active word
-    display_words = []
-    for i, w_str in enumerate(words):
-        emoji = get_word_emoji(w_str) if enable_emojis else ""
-        if i == local_active_idx and emoji:
-            display_words.append(f"{w_str} {emoji}")
+    # Calculate word dimensions & coordinates
+    space_w, _ = measure_text_with_spacing(draw, " ", font, letter_spacing)
+    word_dims = [measure_text_with_spacing(draw, w_text, font, letter_spacing) for w_text in final_words]
+
+    # Line Wrapping Layout Math
+    lines = []
+    if layout_mode == "Two Lines" and len(final_words) > 3:
+        mid = len(final_words) // 2
+        lines = [(final_words[:mid], 0), (final_words[mid:], mid)]
+    elif layout_mode == "Single Line" or layout_mode == "Full Sentence":
+        # Check max width
+        total_line_w = sum(d[0] for d in word_dims) + space_w * (len(final_words) - 1)
+        if total_line_w > (w - 80) and len(final_words) > 2:
+            mid = len(final_words) // 2
+            lines = [(final_words[:mid], 0), (final_words[mid:], mid)]
         else:
-            display_words.append(w_str)
-
-    total_text = " ".join(display_words)
-    bbox = draw.textbbox((0, 0), total_text, font=font)
-    text_w = bbox[2] - bbox[0]
-    text_h = bbox[3] - bbox[1]
-
-    alignment = config.get("alignment", "Center")
-    if alignment == "Center":
-        start_x = max(20, (w - text_w) // 2)
-    elif alignment == "Left":
-        start_x = 40
+            lines = [(final_words, 0)]
     else:
-        start_x = max(20, w - text_w - 40)
+        lines = [(final_words, 0)]
 
-    # Optional Pill / lower third background box
-    if box_bg:
-        px, py = 24, 14
-        draw.rectangle([
-            max(10, start_x - px), start_y - py,
-            min(w - 10, start_x + text_w + px), start_y + text_h + py
-        ], fill=box_bg, outline=box_border, width=2 if box_border else 0)
+    line_height = max(d[1] for d in word_dims) if word_dims else base_font_size
+    total_block_h = len(lines) * line_height + (len(lines) - 1) * 12
 
-    space_w   = draw.textbbox((0, 0), " ", font=font)[2]
-    current_x = start_x
+    top_y = target_y - (total_block_h // 2)
 
-    for idx, d_word in enumerate(display_words):
-        word_w = draw.textbbox((0, 0), d_word, font=font)[2]
-        is_active = (idx == local_active_idx)
+    # ── 7. Render Background Box Styles ───────────────────────
+    for l_idx, (l_words, l_offset) in enumerate(lines):
+        line_w = sum(word_dims[l_offset + i][0] for i in range(len(l_words))) + space_w * max(0, len(l_words) - 1)
+        line_x = (w - line_w) // 2
+        line_y = top_y + l_idx * (line_height + 12)
 
-        color = active_color if is_active else inactive_color
-        stroke_c = stroke_active if (is_active and stroke_active) else stroke_col_def
+        if bg_type == "full_width_bar":
+            draw.rectangle([0, line_y - padding_y, w, line_y + line_height + padding_y], fill=bg_color)
+        elif bg_type == "pill":
+            draw.rounded_rectangle([line_x - padding_x, line_y - padding_y, line_x + line_w + padding_x, line_y + line_height + padding_y], radius=line_height // 2, fill=bg_color)
+        elif bg_type == "gradient_bar":
+            grad_img = Image.new("RGBA", (w, line_height + padding_y * 2), (0, 0, 0, 0))
+            g_draw = ImageDraw.Draw(grad_img)
+            c_left = bg_color
+            c_right = get_cfg("bg_gradient", ((0, 0, 0, 200), (40, 0, 60, 200)))[1]
+            for gx in range(w):
+                ratio = gx / float(w)
+                r_c = tuple(int(c_left[ic] * (1 - ratio) + c_right[ic] * ratio) for ic in range(4))
+                g_draw.line([(gx, 0), (gx, line_height + padding_y * 2)], fill=r_c)
+            overlay.paste(grad_img, (0, line_y - padding_y), grad_img)
+        elif bg_type == "word_box":
+            cur_wx = line_x
+            for i, w_text in enumerate(l_words):
+                ww, wh = word_dims[l_offset + i]
+                draw.rounded_rectangle([cur_wx - 8, line_y - 4, cur_wx + ww + 8, line_y + line_height + 4], radius=6, fill=bg_color)
+                cur_wx += ww + space_w
 
-        # Check if word is an emphasis word or contains numbers (e.g., "180", "KG", "SATURN")
-        w_clean_upper = "".join(c for c in d_word.upper() if c.isalnum())
-        emph_words = [str(w).upper() for w in config.get("emphasis_words", [])]
-        is_emphasis = is_active and (w_clean_upper in emph_words or any(c.isdigit() for c in d_word))
+    # ── 8. Render Words & Animations ─────────────────────────
+    for l_idx, (l_words, l_offset) in enumerate(lines):
+        line_w = sum(word_dims[l_offset + i][0] for i in range(len(l_words))) + space_w * max(0, len(l_words) - 1)
+        cur_x = (w - line_w) // 2
+        line_y = top_y + l_idx * (line_height + 12)
 
-        if is_emphasis:
-            color = (255, 235, 59) if (idx % 2 == 0) else (0, 255, 255)
-            stroke_c = (0, 0, 0)
-            pop_scale = 1.42
-        else:
-            pop_scale = 1.15 if is_active else 1.0
+        for i, w_text in enumerate(l_words):
+            word_index_in_scene = l_offset + i
+            is_active = (word_index_in_scene == local_active_idx)
+            ww, wh = word_dims[word_index_in_scene]
+
+            # Determine word base color
+            if is_active and active_color == "cycle":
+                cycle_cols = [(255, 60, 60), (255, 235, 59), (0, 255, 128), (0, 255, 255)]
+                w_color = cycle_cols[global_active_idx % len(cycle_cols)]
+            elif is_active:
+                w_color = active_color
+            else:
+                w_color = inactive_color
+
+            # Animation Y/X Offsets & Transforms
+            draw_x = cur_x
+            draw_y = line_y
+            render_font = font
+            word_alpha = 255
+            tilt_angle = 0
+
+            if is_active:
+                if animation_type == "scale_pop":
+                    try:
+                        pop_font_size = int(base_font_size * 1.25)
+                        render_font = ImageFont.truetype(font_path, pop_font_size)
+                        draw_y -= int(base_font_size * 0.12)
+                    except Exception:
+                        pass
+                elif animation_type == "bounce":
+                    bounce_y = int(6.0 * abs(math.sin(t * 10.0)))
+                    draw_y -= bounce_y
+                elif animation_type == "shake":
+                    random.seed(word_index_in_scene + int(t * 30))
+                    draw_x += random.randint(-2, 2)
+                    draw_y += random.randint(-2, 2)
+                elif animation_type == "tilt":
+                    tilt_angle = 5 if (word_index_in_scene % 2 == 0) else -5
+
+            if animation_type == "fade_in_word":
+                if word_index_in_scene < local_active_idx:
+                    word_alpha = 255
+                elif word_index_in_scene == local_active_idx:
+                    word_alpha = int(255 * min(1.0, sub_word_progress * 3.3))
+                else:
+                    word_alpha = 0
+
+            if word_alpha <= 0:
+                cur_x += ww + space_w
+                continue
+
+            # Compose word RGBA color
+            color_rgba = (w_color[0], w_color[1], w_color[2], word_alpha)
+            stroke_rgba = (stroke_color[0], stroke_color[1], stroke_color[2], word_alpha)
+
+            # Drop Shadow Pass
+            if shadow and shadow.get("opacity", 0) > 0:
+                sh_x = draw_x + shadow.get("offset_x", 3)
+                sh_y = draw_y + shadow.get("offset_y", 3)
+                sh_col = shadow.get("color", (0, 0, 0))
+                sh_alpha = int(255 * shadow.get("opacity", 0.7) * (word_alpha / 255.0))
+                draw_text_with_spacing(draw, (sh_x, sh_y), w_text, render_font, (sh_col[0], sh_col[1], sh_col[2], sh_alpha), letter_spacing)
+
+            # Neon Glow Pass
+            if glow and is_active and glow.get("opacity", 0) > 0:
+                g_col = glow.get("color", (255, 0, 220))
+                g_rad = glow.get("radius", 10)
+                g_alpha = int(255 * glow.get("opacity", 0.8))
+                glow_img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+                g_draw = ImageDraw.Draw(glow_img)
+                draw_text_with_spacing(g_draw, (draw_x, draw_y), w_text, render_font, (g_col[0], g_col[1], g_col[2], g_alpha), letter_spacing)
+                glow_blurred = glow_img.filter(ImageFilter.GaussianBlur(radius=g_rad))
+                overlay = Image.alpha_composite(overlay, glow_blurred)
+                draw = ImageDraw.Draw(overlay)
+
+            # Stroke / Outline Rendering
+            eff_stroke_col = (active_stroke_col[0], active_stroke_col[1], active_stroke_col[2], word_alpha) if (is_active and active_stroke_col) else stroke_rgba
+            
+            if stroke_style == "glitch" and is_active:
+                # Double cyan / magenta offset glitch stroke
+                draw_text_with_spacing(draw, (draw_x + 2, draw_y), w_text, render_font, (0, 255, 255, word_alpha), letter_spacing)
+                draw_text_with_spacing(draw, (draw_x - 2, draw_y), w_text, render_font, (255, 0, 128, word_alpha), letter_spacing)
+            elif stroke_style == "double" and stroke_width > 0:
+                for s_dist in [stroke_width + 3, stroke_width]:
+                    s_c = (255, 50, 50, word_alpha) if s_dist > stroke_width else eff_stroke_col
+                    for sx in range(-s_dist, s_dist + 1):
+                        for sy in range(-s_dist, s_dist + 1):
+                            if sx*sx + sy*sy <= s_dist*s_dist:
+                                draw_text_with_spacing(draw, (draw_x + sx, draw_y + sy), w_text, render_font, s_c, letter_spacing)
+            elif stroke_style == "solid" and stroke_width > 0:
+                for sx in range(-stroke_width, stroke_width + 1):
+                    for sy in range(-stroke_width, stroke_width + 1):
+                        if sx*sx + sy*sy <= stroke_width*stroke_width:
+                            draw_text_with_spacing(draw, (draw_x + sx, draw_y + sy), w_text, render_font, eff_stroke_col, letter_spacing)
+
+            # ── Draw Word Text / Special Animations ──────────
+            if is_active and animation_type == "karaoke_fill":
+                # Partial character-by-character color fill
+                n_chars = len(w_text)
+                reveal_chars = int(n_chars * sub_word_progress)
+                part_active = w_text[:reveal_chars]
+                part_inactive = w_text[reveal_chars:]
+
+                draw_text_with_spacing(draw, (draw_x, draw_y), part_active, render_font, (0, 255, 128, word_alpha), letter_spacing)
+                pw_active, _ = measure_text_with_spacing(draw, part_active, render_font, letter_spacing)
+                draw_text_with_spacing(draw, (draw_x + pw_active, draw_y), part_inactive, render_font, (200, 200, 200, word_alpha), letter_spacing)
+
+                if underline_bar:
+                    bar_w = int(ww * sub_word_progress)
+                    draw.rectangle([draw_x, draw_y + wh + 4, draw_x + bar_w, draw_y + wh + 8], fill=(0, 255, 128, word_alpha))
+
+            elif is_active and animation_type == "typewriter":
+                n_chars = len(w_text)
+                reveal_chars = max(1, int(n_chars * sub_word_progress))
+                typed_text = w_text[:reveal_chars]
+                if cursor_blink and (int(t * 4) % 2 == 0):
+                    typed_text += "|"
+                draw_text_with_spacing(draw, (draw_x, draw_y), typed_text, render_font, color_rgba, letter_spacing)
+
+            elif is_active and tilt_angle != 0:
+                # PIL Affine Rotation for Active Word Tilt
+                w_box_w = ww + 20
+                w_box_h = wh + 20
+                word_img = Image.new("RGBA", (w_box_w, w_box_h), (0, 0, 0, 0))
+                w_draw = ImageDraw.Draw(word_img)
+                draw_text_with_spacing(w_draw, (10, 10), w_text, render_font, color_rgba, letter_spacing)
+                rotated_word = word_img.rotate(tilt_angle, expand=True, resample=Image.BICUBIC)
+                overlay.paste(rotated_word, (draw_x - 10, draw_y - 10), rotated_word)
+            else:
+                draw_text_with_spacing(draw, (draw_x, draw_y), w_text, render_font, color_rgba, letter_spacing)
+
+            cur_x += ww + space_w
+
+    # 9. Composite PIL overlay onto base frame
+    final_pil = Image.alpha_composite(base_pil, overlay).convert("RGB")
+    return np.array(final_pil)
 
 
-        # Heavy stroke for maximum contrast over video
-        eff_stroke = stroke_r + 2 if is_emphasis else stroke_r
-        for sx in range(-eff_stroke, eff_stroke + 1):
-            for sy in range(-eff_stroke, eff_stroke + 1):
-                if sx != 0 or sy != 0:
-                    draw.text((current_x + sx, start_y + sy), d_word, font=font, fill=stroke_c)
-
-        # Scale Pop micro-animation on active word
-        if is_active:
-            try:
-                pop_size = int(font_size * pop_scale)
-                pop_font = ImageFont.truetype(font_file, pop_size)
-                offset_y = -8 if is_emphasis else -4
-                draw.text((current_x - 3, start_y + offset_y), d_word, font=pop_font, fill=color)
-            except Exception:
-                draw.text((current_x, start_y), d_word, font=font, fill=color)
-        else:
-            draw.text((current_x, start_y), d_word, font=font, fill=color)
-
-        current_x += word_w + space_w
-
-    return np.array(img.convert("RGB"))
-
-
-
+# ── MASTER VFX PIPELINE (COLOR GRADE, TRANSITIONS, OVERLAYS) ─
 def apply_cinematic_vfx(frame, text, t, duration, config, word_timestamps=None):
-    """Master VFX pipeline — runs all effects in order."""
-
-    # 1. Pro Visual FX Pipeline (Auto WB, Primary Grade, Skin Protect, Rolloff, Halation, Grain, etc.)
+    # 1. Pro Visual FX Pipeline
     has_face = config.get("has_face", False)
     frame = apply_pro_vfx_pipeline(frame, t, config, has_face=has_face)
 
-    # 4. Cinematic Transitions & Overlays
-    trans_style = config.get("transition_style", "Whip Zoom & Motion Blur")
-    if trans_style == "Whip Zoom & Motion Blur":
-        frame = apply_whip_zoom(frame, t, duration)
-    elif trans_style == "Glitch RGB Split":
-        frame = apply_glitch_vfx(frame, t, duration)
-    elif trans_style == "Anamorphic Light Leak":
-        frame = apply_light_leak(frame, t, duration)
-
-    # 5. Letterbox
-    if config.get("enable_letterbox"):
-        frame = apply_letterbox(frame, config.get("letterbox_ratio", "2.35:1 (Anamorphic)"))
-
-    # 6. Kinetic Word Subtitles (ElevenLabs/Whisper timestamp sync or linear fallback)
+    # 2. Kinetic Subtitles Rendering Pass
     frame = draw_kinetic_subtitles(
         frame, text, t, duration, config,
         word_timestamps=word_timestamps
     )
 
-    # 7. AI Fact Card Overlay (Lower-third info callout with 0 -> N Count-Up animation)
+    # 3. Fact Card & Location Callout Overlays
     if config.get("enable_fact_cards", True) and config.get("fact_card"):
         frame = draw_fact_card_overlay(frame, config["fact_card"], t=t, duration=duration)
-
-    # 8. AI Map / Location Callout Overlay
     if config.get("map_location"):
         frame = draw_map_location_overlay(frame, config["map_location"])
 
     return frame
 
 
+# ── FACT CARDS & LOCATION CALLOUT OVERLAYS ──────────────────
 def draw_fact_card_overlay(frame, fact_data, t=0.0, duration=1.0):
-    """
-    Renders a sleek lower-third glassmorphic Info Badge with dynamic $0 \rightarrow N$
-    count-up animation over scene duration.
-    """
     if not fact_data or not isinstance(fact_data, dict):
         return frame
 
@@ -436,7 +469,6 @@ def draw_fact_card_overlay(frame, fact_data, t=0.0, duration=1.0):
     if not val_raw:
         return frame
 
-    # Extract digits for count-up interpolation
     import re
     nums = re.findall(r'\d+', val_raw.replace(',', ''))
     if nums and duration > 0:
@@ -448,7 +480,7 @@ def draw_fact_card_overlay(frame, fact_data, t=0.0, duration=1.0):
         val = val_raw
 
     h, w = frame.shape[:2]
-    img = Image.fromarray(frame)
+    img = Image.fromarray(frame).convert("RGBA")
     draw = ImageDraw.Draw(img, "RGBA")
 
     lbl_size = max(13, int(h * 0.020))
@@ -466,13 +498,9 @@ def draw_fact_card_overlay(frame, fact_data, t=0.0, duration=1.0):
     card_w = max(lbl_bbox[2] - lbl_bbox[0], val_bbox[2] - val_bbox[0]) + 36
     card_h = (lbl_bbox[3] - lbl_bbox[1]) + (val_bbox[3] - val_bbox[1]) + 26
 
-    margin_x = int(w * 0.05)
-    margin_y = int(h * 0.08)
-
-    x1, y1 = margin_x, margin_y
+    x1, y1 = int(w * 0.05), int(h * 0.08)
     x2, y2 = x1 + card_w, y1 + card_h
 
-    # Semi-transparent dark pill with cyan accent line
     draw.rounded_rectangle([x1, y1, x2, y2], radius=10, fill=(15, 23, 42, 215), outline=(56, 189, 248, 220), width=2)
     draw.rounded_rectangle([x1 + 4, y1 + 6, x1 + 10, y2 - 6], radius=3, fill=(56, 189, 248, 255))
 
@@ -480,19 +508,16 @@ def draw_fact_card_overlay(frame, fact_data, t=0.0, duration=1.0):
     draw.text((tx, y1 + 8), label, font=font_lbl, fill=(148, 163, 184, 255))
     draw.text((tx, y1 + 12 + (lbl_bbox[3] - lbl_bbox[1])), val, font=font_val, fill=(255, 235, 59, 255))
 
-    return np.array(img)
+    return np.array(img.convert("RGB"))
 
 
 def draw_map_location_overlay(frame, location_name: str):
-    """
-    Renders a glowing top-right glassmorphic 3D Location Callout Badge.
-    """
     if not location_name:
         return frame
 
     loc_str = f"📍 LOCATION: {str(location_name).upper().strip()}"
     h, w = frame.shape[:2]
-    img = Image.fromarray(frame)
+    img = Image.fromarray(frame).convert("RGBA")
     draw = ImageDraw.Draw(img, "RGBA")
 
     font_size = max(14, int(h * 0.024))
@@ -513,17 +538,11 @@ def draw_map_location_overlay(frame, location_name: str):
     draw.rounded_rectangle([x1, y1, x2, y2], radius=8, fill=(15, 23, 42, 220), outline=(245, 158, 11, 230), width=2)
     draw.text((x1 + 15, y1 + 8), loc_str, font=font, fill=(255, 255, 255, 255))
 
-    return np.array(img)
+    return np.array(img.convert("RGB"))
 
 
-
-
+# ── INSTANT LIVE PREVIEW GENERATOR ───────────────────────────
 def generate_live_preview_frame(config: dict, sample_text: str = "NEON CITIES ARE EXPANDING TODAY 🔥", active_word_index: int = 2) -> np.ndarray:
-    """
-    Generates a fast (<10ms) live preview image frame matching the user's current
-    sidebar settings (aspect ratio, color grade Preset, brightness, contrast,
-    saturation, vignette, typography package, font, size, position, active highlight).
-    """
     aspect = config.get("aspect_ratio", "16:9 Landscape (YouTube)")
 
     if "9:16" in aspect:
@@ -537,23 +556,19 @@ def generate_live_preview_frame(config: dict, sample_text: str = "NEON CITIES AR
     else:
         w, h = 960, 540
 
-    # 1. Generate stylized synthetic cinematic scene background
     Y, X = np.ogrid[:h, :w]
     cx, cy = w / 2, h / 3
     dist = np.sqrt(((X - cx) / w) ** 2 + ((Y - cy) / h) ** 2)
 
-    # Gradient sky + horizon landscape background
     r_chan = np.clip(30 + 120 * (Y / h) + 40 * (1 - dist), 0, 255).astype(np.uint8)
     g_chan = np.clip(20 + 80 * (Y / h) + 60 * (1 - dist), 0, 255).astype(np.uint8)
     b_chan = np.clip(50 + 160 * (1 - Y / h) + 50 * (1 - dist), 0, 255).astype(np.uint8)
     bg = np.dstack((r_chan, g_chan, b_chan))
 
-    # Add subtle distant city silhouette / horizon line
     horizon_y = int(h * 0.65)
     bg[horizon_y:, :] = (bg[horizon_y:, :] * 0.4).astype(np.uint8)
 
-    # 2. Build mock word timestamps so active_word_index is highlighted
-    words = [w for w in sample_text.split() if w]
+    words = [w_s for w_s in sample_text.split() if w_s]
     n_words = max(len(words), 1)
     dur = 4.0
     time_per_word = dur / n_words
@@ -561,14 +576,13 @@ def generate_live_preview_frame(config: dict, sample_text: str = "NEON CITIES AR
 
     word_ts = [
         {
-            "word":  w,
+            "word":  w_s,
             "start": round(i * time_per_word, 3),
             "end":   round((i + 1) * time_per_word, 3),
         }
-        for i, w in enumerate(words)
+        for i, w_s in enumerate(words)
     ]
 
-    # 3. Apply full VFX + Color Grade + Kinetic Subtitles
     preview_frame = apply_cinematic_vfx(
         bg, sample_text, t=t_preview, duration=dur,
         config=config, word_timestamps=word_ts

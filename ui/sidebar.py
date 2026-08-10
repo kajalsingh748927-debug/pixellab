@@ -8,8 +8,7 @@ the complete video_config dictionary plus scene_count and word_length.
 """
 import streamlit as st
 from modules.cinematic_packages import get_cinematic_package, CINEMATIC_PACKAGES
-
-
+from modules.subtitle_packages import get_subtitle_package, SUBTITLE_PACKAGES
 
 DURATION_MAP = {
     "✨ Dynamic Script Pacing (Auto Duration & Scenes)": ("AUTO", "Auto Pacing"),
@@ -30,9 +29,7 @@ def render_sidebar() -> dict:
     Draws the full sidebar and returns a config dict with keys:
         video_config, scene_count, word_length, video_duration, audio_mode
     """
-    # Read audio mode set by page.py (so sidebar can hide irrelevant controls)
     audio_mode = "🎤 Upload Your Own Audio"
-    is_upload_mode = True
 
     with st.sidebar:
 
@@ -44,7 +41,6 @@ def render_sidebar() -> dict:
 
         # ── 1. VIDEO LAYOUT ──────────────────────────────────
         st.header("📐 Video Layout")
-
 
         aspect_ratio = st.selectbox(
             "Aspect Ratio",
@@ -82,7 +78,6 @@ def render_sidebar() -> dict:
             help="Dynamic Script Pacing automatically breaks your script into natural scenes and matches the exact voiceover length!"
         )
 
-
         encoder_choice = st.selectbox(
             "⚡ Hardware Encoder",
             [
@@ -91,7 +86,7 @@ def render_sidebar() -> dict:
                 "Intel QuickSync (GPU/iGPU)",
             ],
             index=0,
-            help="CPU works on every machine. NVENC/QuickSync are 5-10× faster but require NVIDIA/Intel GPU drivers. If GPU fails, the system auto-falls back to CPU."
+            help="CPU works on every machine. NVENC/QuickSync are 5-10× faster but require NVIDIA/Intel GPU drivers."
         )
 
         st.divider()
@@ -119,7 +114,6 @@ def render_sidebar() -> dict:
                 "🌌 IMAX Neutral",
             ],
             index=1,
-            help="Select an all-in-one cinematic profile to configure color grading, exposure, vignettes, flares, and transitions in 1-Click!"
         )
 
         intensity_tier = st.radio(
@@ -127,7 +121,6 @@ def render_sidebar() -> dict:
             ["Subtle", "Standard", "Bold"],
             index=1,
             horizontal=True,
-            help="Subtle (0.6×), Standard (1.0×), Bold (1.4×) intensity scale across all optical effects."
         )
 
         pkg_defaults = get_cinematic_package(cinematic_package, intensity_tier=intensity_tier) if cinematic_package != "Custom (Manual Overrides)" else {}
@@ -135,15 +128,8 @@ def render_sidebar() -> dict:
         if cinematic_package != "Custom (Manual Overrides)":
             st.info(f"✨ **{cinematic_package}** ({intensity_tier})  \n*{pkg_defaults.get('description', '')}*")
 
-        master_intensity = st.slider(
-            "Master Intensity", 0.50, 1.50, 1.00, 0.05,
-            help="Scales the overall preset intensity without changing its color identity."
-        )
-
-        adaptive_on = st.checkbox(
-            "🎯 Adapt per scene automatically", value=pkg_defaults.get("adaptive", True),
-            help="Content-aware: reduces bloom/flares on dark shots without highlights, increases grain in shadows, protects faces."
-        )
+        master_intensity = st.slider("Master Intensity", 0.50, 1.50, 1.00, 0.05)
+        adaptive_on = st.checkbox("🎯 Adapt per scene automatically", value=pkg_defaults.get("adaptive", True))
 
         with st.expander("⚙️ Advanced Color & VFX Overrides", expanded=(cinematic_package == "Custom (Manual Overrides)")):
             wb_strength = st.slider("Source Normalization (Auto WB)", 0.0, 1.0, float(pkg_defaults.get("wb_strength", 0.70)), 0.05)
@@ -154,13 +140,7 @@ def render_sidebar() -> dict:
 
             transition_style = st.selectbox(
                 "Scene Transition Style",
-                [
-                    "Seamless Crossfade",
-                    "Whip Zoom & Motion Blur",
-                    "Glitch RGB Split",
-                    "Anamorphic Light Leak",
-                    "Clean Cut (Instant)",
-                ],
+                ["Seamless Crossfade", "Whip Zoom & Motion Blur", "Glitch RGB Split", "Anamorphic Light Leak", "Clean Cut (Instant)"],
                 index=0
             )
 
@@ -181,23 +161,12 @@ def render_sidebar() -> dict:
                 disabled=not enable_zoom,
             )
 
-            enable_transitions = st.checkbox(
-                "🔀 Randomized Cinematic Scene Transitions",
-                value=True,
-                help="Joins scene clips with non-repeating cinematic transitions (Whip Pan, Zoom Blur, RGB Split Glitch, Light Leak Wipe, Speed Ramp)."
-            )
-            transition_duration = st.slider(
-                "Transition Overlap Duration (seconds)",
-                0.15, 0.60, 0.35, 0.05,
-                disabled=not enable_transitions
-            )
-
+            enable_transitions = st.checkbox("🔀 Randomized Cinematic Scene Transitions", value=True)
+            transition_duration = st.slider("Transition Overlap Duration (seconds)", 0.15, 0.60, 0.35, 0.05, disabled=not enable_transitions)
             enable_fade   = st.checkbox("Scene Fade Transitions", value=False)
             fade_duration = st.slider("Fade Duration (seconds)", 0.1, 1.0, 0.3, 0.1, disabled=not enable_fade)
-
             enable_grain    = st.checkbox("Film Grain Effect", value=pkg_defaults.get("enable_grain", False))
             grain_intensity = st.slider("Grain Intensity", 0.0, 1.0, float(pkg_defaults.get("grain_intensity", 0.08)), 0.05, disabled=not enable_grain)
-
             enable_split_toning     = st.checkbox("Split Toning (Shadow Tint)", value=pkg_defaults.get("enable_split_toning", False))
             split_toning_intensity  = st.slider("Split Toning Intensity", 0.0, 1.0, float(pkg_defaults.get("split_toning_intensity", 0.2)), 0.05, disabled=not enable_split_toning)
             enable_bloom            = st.checkbox("Glow & Bloom Effect", value=pkg_defaults.get("enable_bloom", False))
@@ -206,218 +175,160 @@ def render_sidebar() -> dict:
             enable_chromatic_aberration = st.checkbox("Chromatic Aberration (RGB Split)", value=pkg_defaults.get("enable_chromatic_aberration", False))
             enable_gate_weave       = st.checkbox("Retro Gate Weave (Projector Shake)", value=pkg_defaults.get("enable_gate_weave", False))
 
-        # Build full video_config dictionary
-        video_config = dict(pkg_defaults)
-        video_config.update({
-            "aspect_ratio": aspect_ratio,
-            "resolution": resolution,
-            "fps": fps_choice,
-            "video_duration": video_duration,
-            "encoder": encoder_choice,
-            "cinematic_package": cinematic_package,
-            "master_intensity": master_intensity,
-            "adaptive": adaptive_on,
-            "wb_strength": wb_strength,
-            "skin_protect": skin_protect,
-            "rolloff_knee": rolloff_knee,
-            "saturation": saturation * master_intensity,
-            "vignette": vignette_strength * master_intensity,
-            "bloom_intensity": float(bloom_intensity if 'bloom_intensity' in locals() else pkg_defaults.get("bloom_intensity", 0.30)) * master_intensity,
-            "grain_intensity": float(grain_intensity if 'grain_intensity' in locals() else pkg_defaults.get("grain_intensity", 0.08)) * master_intensity,
-            "transition_style": transition_style,
-            "enable_transitions": enable_transitions,
-            "transition_duration": transition_duration,
-            "enable_auto_framing": enable_auto_framing,
-            "enable_letterbox": enable_letterbox,
-            "letterbox_ratio": letterbox_ratio,
-            "enable_zoom": enable_zoom,
-            "zoom_direction": zoom_direction,
-            "enable_fade": enable_fade,
-            "fade_duration": fade_duration,
-            "enable_grain": enable_grain,
-            "enable_split_toning": enable_split_toning,
-            "split_toning_intensity": split_toning_intensity if 'split_toning_intensity' in locals() else pkg_defaults.get("split_toning_intensity", 0.20),
-            "enable_bloom": enable_bloom,
-            "enable_anamorphic_flare": enable_anamorphic_flare,
-            "enable_chromatic_aberration": enable_chromatic_aberration,
-            "enable_gate_weave": enable_gate_weave,
-        })
-
-
         st.divider()
 
-        # ── 3. SUBTITLE STYLE ────────────────────────────────
-        st.header("💬 Subtitle Style")
+        # ── 3. SUBTITLE ENGINE CONTROLS (EXPANDERS) ──────────
+        st.header("💬 Professional Subtitle Engine")
 
-        st.subheader("📦 Preset Typography Packages")
         subtitle_package = st.selectbox(
-            "1-Click Subtitle Package",
-            [
-                "Custom (Manual Controls)",
-                "🔥 Hormozi Kinetic",
-                "💥 MrBeast Impact",
-                "⚡ Cyberpunk Glitch",
-                "✨ Opus Glow",
-                "🍿 Cinema Minimalist",
-                "🗯️ Comic Boom",
-                "📰 News Breaking Ticker",
-                "🎤 Karaoke Wave",
-                "🔮 Neon Synthwave",
-                "⌨️ Typewriter Retro",
-            ],
-            index=1,
-            help="Select a complete industry typography preset or choose Custom for manual tuning."
-        )
-
-        sub_style = st.selectbox(
-            "Subtitle Visual Style",
-            [
-                "Kinetic Yellow", "Cyberpunk Neon", "Clean Classic",
-                "Boxed Background", "Fire Red", "Instagram White",
-                "MrBeast Bold", "Gradient Rainbow", "Minimal Fade",
-            ],
+            "📦 Typography Package (Preset)",
+            list(SUBTITLE_PACKAGES.keys()) + ["Custom (Manual Controls)"],
             index=0,
-            disabled=(subtitle_package != "Custom (Manual Controls)")
+            help="Select a industry typography preset or customize every detail manually below!"
         )
 
-        sub_size = st.select_slider(
-            "Subtitle Size",
-            options=["Tiny", "Small", "Medium", "Large", "Extra Large", "Massive"],
-            value="Medium",
-        )
+        sub_pkg_defaults = get_subtitle_package(subtitle_package) if subtitle_package != "Custom (Manual Controls)" else {}
 
-        sub_position = st.selectbox(
-            "Subtitle Position",
-            ["Bottom", "Lower Center", "Center", "Upper Center", "Top"],
-            index=0,
-        )
+        # ── EXPANDER 1: TYPOGRAPHY & FONT ──
+        with st.expander("🔤 Typography & Font Family", expanded=(subtitle_package == "Custom (Manual Controls)")):
+            font_choice = st.selectbox(
+                "Font Family",
+                [
+                    "🍿 DejaVu Sans Bold (Default)",
+                    "💥 Impact (Heavy Viral Bold)",
+                    "🅰️ Arial Black (Modern Bold)",
+                    "⚡ Trebuchet (Kinetic Dynamic)",
+                    "📖 Georgia (Cinematic Serif)",
+                    "🗯️ Comic Sans (Fun & Casual)",
+                    "🖥️ Courier New (Retro Monospace)",
+                    "📜 Times New Roman (Classic)",
+                    "✨ Verdana (Clean Ultra-Readable)",
+                    "🔹 Tahoma (Crisp Tech)",
+                    "📱 Segoe UI (Modern UI)",
+                ],
+                index=0,
+            )
+            size_scale = st.slider("Font Scale", 0.5, 2.0, float(sub_pkg_defaults.get("size_scale", 1.0)), 0.05)
+            letter_spacing = st.slider("Letter Spacing (px)", 0, 10, int(sub_pkg_defaults.get("letter_spacing", 0)), 1)
 
-        sub_animation = st.selectbox(
-            "Word Highlight Animation",
-            [
-                "Active Word Highlight", "Karaoke Underline", "Scale Pop",
-                "All White (No Animation)", "Fade In Words",
-            ],
-            index=0,
-        )
+        # ── EXPANDER 2: POSITIONING & LAYOUT ──
+        with st.expander("📍 Positioning & Text Layout", expanded=False):
+            sub_position = st.selectbox(
+                "Subtitle Screen Position",
+                ["Bottom", "Lower Third", "Center", "Upper Third", "Top", "Custom"],
+                index=["Bottom", "Lower Third", "Center", "Upper Third", "Top", "Custom"].index(sub_pkg_defaults.get("position", "Bottom")) if sub_pkg_defaults.get("position") in ["Bottom", "Lower Third", "Center", "Upper Third", "Top", "Custom"] else 0
+            )
+            custom_y_pct = st.slider("Custom Y% (0=Top, 100=Bottom)", 0, 100, int(sub_pkg_defaults.get("custom_y_pct", 85)), 1)
+            
+            layout_mode = st.selectbox(
+                "Text Layout Mode",
+                ["Single Line", "Two Lines", "Word-by-Word", "Three Words at a Time", "Full Sentence"],
+                index=["Single Line", "Two Lines", "Word-by-Word", "Three Words at a Time", "Full Sentence"].index(sub_pkg_defaults.get("layout_mode", "Two Lines")) if sub_pkg_defaults.get("layout_mode") in ["Single Line", "Two Lines", "Word-by-Word", "Three Words at a Time", "Full Sentence"] else 1
+            )
 
-        sub_alignment = st.selectbox(
-            "Text Alignment", ["Center", "Left", "Right"], index=0
-        )
+        # ── EXPANDER 3: ANIMATIONS ──
+        with st.expander("✨ Word Highlight Animation", expanded=False):
+            animation_type = st.selectbox(
+                "Active Word Animation",
+                ["scale_pop", "bounce", "shake", "glow", "karaoke_fill", "typewriter", "fade_in_word", "tilt", "none"],
+                index=["scale_pop", "bounce", "shake", "glow", "karaoke_fill", "typewriter", "fade_in_word", "tilt", "none"].index(sub_pkg_defaults.get("animation_type", "scale_pop")) if sub_pkg_defaults.get("animation_type") in ["scale_pop", "bounce", "shake", "glow", "karaoke_fill", "typewriter", "fade_in_word", "tilt", "none"] else 0
+            )
+            enable_emojis = st.checkbox("🔥 Auto-Emoji Highlights", value=sub_pkg_defaults.get("enable_emojis", True))
 
-        font_choice = st.selectbox(
-            "Font Family",
-            [
-                "💥 Impact (Heavy Viral Bold)",
-                "🅰️ Arial Black (Modern Bold)",
-                "⚡ Trebuchet (Kinetic Dynamic)",
-                "📖 Georgia (Cinematic Serif)",
-                "🗯️ Comic Sans (Fun & Casual)",
-                "🖥️ Courier New (Retro Monospace)",
-                "📜 Times New Roman (Classic)",
-                "✨ Verdana (Clean Ultra-Readable)",
-                "🔹 Tahoma (Crisp Tech)",
-                "📱 Segoe UI (Modern UI)",
-                "🍿 DejaVu Sans Bold (Default)",
-            ],
-            index=0,
-            help="Select a font family for kinetic subtitles."
-        )
+        # ── EXPANDER 4: BACKGROUND / BOX STYLES ──
+        with st.expander("📦 Background & Box Styles", expanded=False):
+            background_type = st.selectbox(
+                "Background Style",
+                ["none", "full_width_bar", "pill", "word_box", "shadow_only", "gradient_bar"],
+                index=["none", "full_width_bar", "pill", "word_box", "shadow_only", "gradient_bar"].index(sub_pkg_defaults.get("background_type", "none")) if sub_pkg_defaults.get("background_type") in ["none", "full_width_bar", "pill", "word_box", "shadow_only", "gradient_bar"] else 0
+            )
+            bg_color_hex = st.color_picker("Box Fill Color", "#000000")
+            bg_opacity = st.slider("Box Opacity (%)", 0, 100, 70, 5)
 
-        subtitle_language = st.selectbox(
-            "Subtitle Text Language",
-            [
-                "🇬🇧 100% English Subtitles (Default)",
-            ],
-            index=0,
-            help="Extracts audio and translates all voiceovers (Hindi/Hinglish/Foreign) into 100% clean English kinetic subtitles."
-        )
+        # ── EXPANDER 5: STROKE & OUTLINE ──
+        with st.expander("🖊️ Stroke & Outline", expanded=False):
+            stroke_style = st.selectbox(
+                "Stroke Style",
+                ["solid", "double", "glitch", "none"],
+                index=["solid", "double", "glitch", "none"].index(sub_pkg_defaults.get("stroke_style", "solid")) if sub_pkg_defaults.get("stroke_style") in ["solid", "double", "glitch", "none"] else 0
+            )
+            stroke_width = st.slider("Stroke Width (px)", 0, 10, int(sub_pkg_defaults.get("stroke_width", 5)), 1)
+            stroke_color_hex = st.color_picker("Stroke Color", "#000000")
 
-        subtitle_bg_box = st.selectbox(
-            "Subtitle Background Box",
-            [
-                "None (Clean Floating Text)",
-                "Dark Pill Box",
-                "Semi-Transparent Shadow",
-            ],
-            index=0,
-            help="Choose None for clean floating subtitles with outline, or add a dark box."
-        )
+        # ── EXPANDER 6: SHADOW & NEON GLOW ──
+        with st.expander("🌟 Shadow & Neon Glow", expanded=False):
+            st.markdown("**Drop Shadow**")
+            enable_shadow = st.checkbox("Enable Drop Shadow", value=sub_pkg_defaults.get("shadow") is not None)
+            shadow_offset_x = st.slider("Shadow Offset X", -10, 10, 4, 1)
+            shadow_offset_y = st.slider("Shadow Offset Y", -10, 10, 4, 1)
+            shadow_color_hex = st.color_picker("Shadow Color", "#000000")
+            shadow_opacity = st.slider("Shadow Opacity", 0.0, 1.0, 0.8, 0.05)
 
-        stroke_width = st.slider("Text Stroke / Outline Width", 0, 10, 5, 1)
+            st.divider()
+            st.markdown("**Neon Glow & Bloom**")
+            enable_glow = st.checkbox("Enable Neon Glow", value=sub_pkg_defaults.get("glow") is not None)
+            glow_color_hex = st.color_picker("Glow Color", "#00FFFF")
+            glow_radius = st.slider("Glow Radius", 1, 20, 10, 1)
+            glow_opacity = st.slider("Glow Opacity", 0.0, 1.0, 0.8, 0.05)
 
-        enable_fact_cards = st.checkbox(
-            "📊 Enable AI Fact Cards & Stat Callouts",
-            value=True,
-            help="Renders animated lower-third info badges when numbers, stats, or facts are mentioned."
-        )
+        # ── EXPANDER 7: COLOR CONTROLS ──
+        with st.expander("🎨 Word Colors (Active & Inactive)", expanded=False):
+            active_color_hex = st.color_picker("Active Word Color", "#FFEB3B")
+            inactive_color_hex = st.color_picker("Inactive Word Color", "#FFFFFF")
+
+        enable_fact_cards = st.checkbox("📊 Enable AI Fact Cards & Stat Callouts", value=True)
 
         st.divider()
 
-
-        # ── 5. SOUND DESIGN & BACKGROUND MUSIC ───────────────
+        # ── 4. SOUND DESIGN ───────────────────────────────────
         st.header("🎵 Sound Design & Audio")
         st.info("🎤 **Audio Upload Mode**: Your uploaded voiceover audio will be used directly.")
 
-        voice_choice = "en-US-ChristopherNeural"
-        voice_speed  = "Normal"
-
-        enable_bg_music = st.checkbox(
-            "🎵 AI Background Music & Transition SFX", value=True
-        )
-
+        enable_bg_music = st.checkbox("🎵 AI Background Music & Transition SFX", value=True)
         bg_music_mood = st.selectbox(
             "🎵 Background Music Mood",
-            [
-                "🎬 Cinematic Epic",
-                "🔥 Cyberpunk Synthwave",
-                "☕ Lo-Fi Chill",
-                "📜 Documentary Ambient",
-                "🚀 Energetic Action",
-                "None",
-            ],
+            ["🎬 Cinematic Epic", "🔥 Cyberpunk Synthwave", "☕ Lo-Fi Chill", "📜 Documentary Ambient", "🚀 Energetic Action", "None"],
             index=0,
-            help="Select the musical mood for background track auto-ducking."
         )
 
         st.divider()
 
-
-        # ── 6. AI DIRECTOR ───────────────────────────────────
+        # ── 5. AI DIRECTOR ───────────────────────────────────
         st.header("🤖 AI Director Settings")
-
         ai_tone = st.selectbox(
             "Script Tone",
-            [
-                "Cinematic & Epic", "Documentary", "Motivational",
-                "News Style", "Story Narrative", "Educational", "Dramatic",
-            ],
+            ["Cinematic & Epic", "Documentary", "Motivational", "News Style", "Story Narrative", "Educational", "Dramatic"],
             index=0,
         )
-
         ai_language = st.selectbox(
             "Script Language",
             ["English", "Hindi", "Hinglish", "Spanish", "French", "German", "Arabic"],
             index=0,
         )
+        enable_ai_image_fallback = st.checkbox("🎨 AI Image Fallback", value=True)
 
-        enable_ai_image_fallback = st.checkbox(
-            "🎨 AI Image-to-3D Motion Fallback (FLUX 4K)",
-            value=True,
-            help="Generates photorealistic 4K AI images and converts them to 3D Ken-Burns motion clips when stock videos are unavailable."
-        )
+    # ── Convert Hex Colors to RGBA/RGB ──
+    def hex_to_rgb_tuple(h):
+        h = h.lstrip("#")
+        return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
 
-    # ── Build video_config ────────────────────────────────────
+    bg_rgb = hex_to_rgb_tuple(bg_color_hex)
+    bg_rgba = (bg_rgb[0], bg_rgb[1], bg_rgb[2], int(255 * (bg_opacity / 100.0)))
+    active_rgb = hex_to_rgb_tuple(active_color_hex)
+    inactive_rgb = hex_to_rgb_tuple(inactive_color_hex)
+    stroke_rgb = hex_to_rgb_tuple(stroke_color_hex)
+    shadow_rgb = hex_to_rgb_tuple(shadow_color_hex)
+    glow_rgb = hex_to_rgb_tuple(glow_color_hex)
+
+    # Build video_config dictionary
     scene_count, word_length = DURATION_MAP[video_duration]
 
     video_config = dict(pkg_defaults)
     video_config.update({
-        # Layout
         "aspect_ratio": aspect_ratio,
         "resolution":   resolution,
         "fps":          fps_choice,
         "encoder":      encoder_choice,
-        # Color & Cinematic Packages
         "cinematic_package": cinematic_package,
         "color_grade":  pkg_defaults.get("color_grade", "Cinematic Teal & Orange"),
         "brightness":   pkg_defaults.get("brightness", 0),
@@ -430,17 +341,37 @@ def render_sidebar() -> dict:
         "skin_protect": skin_protect,
         "rolloff_knee": rolloff_knee,
 
-        # Subtitles
+        # Subtitle Engine Settings
         "subtitle_package": subtitle_package,
-        "style":        sub_style,
-        "size":         sub_size,
-        "position":     sub_position,
-        "animation":    sub_animation,
-        "alignment":    sub_alignment,
-        "font":         font_choice,
-        "subtitle_language": subtitle_language,
-        "subtitle_bg_box": subtitle_bg_box,
-        "stroke_width": stroke_width,
+        "font_file":        font_choice.split(" (")[0].strip(),
+        "font":             font_choice,
+        "size_scale":       size_scale,
+        "letter_spacing":   letter_spacing,
+        "position":         sub_position,
+        "custom_y_pct":     custom_y_pct,
+        "layout_mode":      layout_mode,
+        "animation_type":   animation_type,
+        "enable_emojis":    enable_emojis,
+        "background_type":  background_type,
+        "bg_color":         bg_rgba,
+        "stroke_style":     stroke_style,
+        "stroke_width":     stroke_width,
+        "stroke_color":     stroke_rgb,
+        "active_color":     active_rgb if subtitle_package == "Custom (Manual Controls)" else sub_pkg_defaults.get("active_color", active_rgb),
+        "inactive_color":   inactive_rgb if subtitle_package == "Custom (Manual Controls)" else sub_pkg_defaults.get("inactive_color", inactive_rgb),
+        "shadow": {
+            "offset_x": shadow_offset_x,
+            "offset_y": shadow_offset_y,
+            "color": shadow_rgb,
+            "opacity": shadow_opacity,
+            "blur": 2,
+        } if enable_shadow else None,
+        "glow": {
+            "color": glow_rgb,
+            "radius": glow_radius,
+            "opacity": glow_opacity,
+        } if enable_glow else None,
+
         "enable_fact_cards": enable_fact_cards,
 
         # VFX
@@ -454,22 +385,21 @@ def render_sidebar() -> dict:
         "fade_duration":       fade_duration if enable_fade else 0,
         "enable_grain":        enable_grain,
         "grain_intensity":     (grain_intensity * master_intensity) if enable_grain else 0,
-        # Pro VFX
-        "enable_split_toning":        enable_split_toning,
-        "split_toning_intensity":     (split_toning_intensity * master_intensity) if enable_split_toning else 0,
-        "enable_bloom":               enable_bloom,
-        "bloom_intensity":            (bloom_intensity * master_intensity) if enable_bloom else 0,
-        "enable_anamorphic_flare":    enable_anamorphic_flare,
+        "enable_split_toning": enable_split_toning,
+        "split_toning_intensity": (split_toning_intensity * master_intensity) if enable_split_toning else 0,
+        "enable_bloom":        enable_bloom,
+        "bloom_intensity":     (bloom_intensity * master_intensity) if enable_bloom else 0,
+        "enable_anamorphic_flare": enable_anamorphic_flare,
         "enable_chromatic_aberration": enable_chromatic_aberration,
-        "enable_gate_weave":           enable_gate_weave,
-        # Voice & Audio
-        "voice":           voice_choice.split(" (")[0],
-        "voice_speed":     voice_speed,
+        "enable_gate_weave":   enable_gate_weave,
+
+        # Audio & AI
+        "voice":           "en-US-ChristopherNeural",
+        "voice_speed":     "Normal",
         "enable_bg_music": enable_bg_music,
         "bg_music_mood":   bg_music_mood,
-        # AI
-        "ai_tone":     ai_tone,
-        "ai_language": ai_language,
+        "ai_tone":         ai_tone,
+        "ai_language":     ai_language,
         "enable_ai_image_fallback": enable_ai_image_fallback,
     })
 
@@ -480,9 +410,8 @@ def render_sidebar() -> dict:
         "video_duration":  video_duration,
         "ai_tone":         ai_tone,
         "fps_choice":      fps_choice,
-        "voice_choice":    voice_choice,
         "aspect_ratio":    aspect_ratio,
         "color_grade":     video_config.get("color_grade", "Cinematic Teal & Orange"),
-        "sub_style":       sub_style,
+        "sub_style":       subtitle_package,
         "audio_mode":      audio_mode,
     }
