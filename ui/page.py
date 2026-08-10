@@ -328,9 +328,9 @@ def render_page(sidebar_data: dict, api_keys: dict, keys_ready: bool):
         )
         word_timestamps = []
 
-    # ── Show transcription preview ─────────────────────────────────────
+    # ── Show transcription preview & Extraction Review ─────────────────
     with st.expander(
-        f"📝 Transcription Preview ({len(word_timestamps)} words | "
+        f"📝 Transcription & Extraction Review ({len(word_timestamps)} words | "
         f"{total_duration:.1f}s | method: {method})",
         expanded=True,
     ):
@@ -340,6 +340,12 @@ def render_page(sidebar_data: dict, api_keys: dict, keys_ready: bool):
                 "⚠️ Whisper not installed — using linear interpolation for word timing.  \n"
                 "For accurate subtitle sync: `pip install openai-whisper`"
             )
+
+        # Render Single-Screen Title & Facts Extraction Review Panel
+        from ui.extraction_review import render_extraction_review_panel
+        review_data = render_extraction_review_panel(full_text, api_key=groq_key)
+        if review_data.get("title"):
+            video_config["intro_title_override"] = review_data["title"]
 
     # ── Split into scenes ──────────────────────────────────────────────
     status_box.info("🎬 Step 2/4 — Splitting audio into scenes...")
