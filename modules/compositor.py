@@ -366,7 +366,14 @@ def build_master_video_from_audio(
         update_and_notify(84, f"🔀 Applying cinematic transitions to {len(processed_clips)} scenes...")
         from modules.transitions import get_random_transition, apply_transition
 
-        loaded_clips = [VideoFileClip(c) for c in processed_clips if os.path.exists(c)]
+        loaded_clips = []
+        for c in processed_clips:
+            if os.path.exists(c) and os.path.getsize(c) > 10000:
+                try:
+                    loaded_clips.append(VideoFileClip(c))
+                except Exception as ve:
+                    safe_print(f"⚠️ Warning: skipping corrupt scene chunk '{c}': {ve}")
+
         if loaded_clips:
             last_trans = None
             cur_clip = loaded_clips[0]
