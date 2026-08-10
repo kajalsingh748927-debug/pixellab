@@ -190,7 +190,7 @@ def render_sidebar() -> dict:
         sub_pkg_defaults = get_subtitle_package(subtitle_package) if subtitle_package != "Custom (Manual Controls)" else {}
 
         # ── EXPANDER 1: TYPOGRAPHY & FONT ──
-        with st.expander("🔤 Typography & Font Family", expanded=(subtitle_package == "Custom (Manual Controls)")):
+        with st.expander("🔤 Typography & Font Family", expanded=True):
             font_choice = st.selectbox(
                 "Font Family",
                 [
