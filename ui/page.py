@@ -9,6 +9,7 @@ kinetic subtitles + Pexels HD video cuts to your voice.
 """
 import os
 import time
+import numpy as np
 import streamlit as st
 
 from modules.ai_director  import analyze_transcript, generate_video_brief
