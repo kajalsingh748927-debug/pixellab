@@ -379,12 +379,65 @@ def apply_outro_overlay(frame: np.ndarray, t: float, scene_duration: float, outr
             cur_y += lh + int(h * 0.04)
 
         # 5. Channel Handle
-        if channel_name:
-            cx_x = center_x - (ch_w // 2)
-            draw_readable_text(draw, (cx_x, cur_y), channel_name, font_channel, (255, 235, 59, alpha), 2)
+        ch_x = center_x - (ch_w // 2)
+        draw_readable_text(draw, (ch_x, cur_y), channel_name, font_channel, (200, 220, 255, alpha), 2)
 
-        final_pil = Image.alpha_composite(base_pil, overlay).convert("RGB")
-        return np.array(final_pil)
+        out_pil = Image.alpha_composite(base_pil, overlay)
+        return np.array(out_pil.convert("RGB"))
 
-    except Exception:
+    except Exception as e:
+        safe_print(f"⚠️ apply_outro_overlay notice: {e}")
+        return frame
+
+
+# ── 4. KINETIC INFO GRAPHIC / DATA CALLOUT OVERLAY ───────────────────────────
+def apply_fact_callout_overlay(frame: np.ndarray, t: float, fact_card: dict, config: dict) -> np.ndarray:
+    """
+    Draws a documentary-style On-Screen Data Callout badge over real video frame.
+    Shows label, stat number/value, and peak time timestamp indicator.
+    """
+    if not fact_card or not isinstance(fact_card, dict):
+        return frame
+
+    label = str(fact_card.get("label", "KEY STATISTIC")).upper().strip()
+    val = str(fact_card.get("value", "")).strip()
+    peak_t = str(fact_card.get("peak_time", "")).strip()
+
+    if not val:
+        return frame
+
+    try:
+        h, w = frame.shape[:2]
+        base_pil = Image.fromarray(frame).convert("RGBA")
+        overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay)
+
+        font_val = get_cached_font("DejaVuSans-Bold.ttf", max(24, int(h * 0.05)))
+        font_lbl = get_cached_font("DejaVuSans-Bold.ttf", max(14, int(h * 0.025)))
+
+        vw, vh = measure_text_with_spacing(draw, val, font_val, 2)
+        lw, lh = measure_text_with_spacing(draw, label, font_lbl, 2)
+
+        badge_w = max(vw, lw) + 40
+        badge_h = vh + lh + 30
+
+        # Upper right placement
+        bx = w - badge_w - int(w * 0.05)
+        by = int(h * 0.08)
+
+        bg_col = (10, 20, 40, 210)
+        border_col = (68, 136, 255, 240)
+
+        # Draw callout box
+        draw.rounded_rectangle([bx, by, bx + badge_w, by + badge_h], radius=15, fill=bg_col, outline=border_col, width=3)
+
+        # Label & Value
+        draw_text_with_spacing(draw, (bx + 20, by + 12), label, font_lbl, (180, 210, 255, 255), 2)
+        draw_text_with_spacing(draw, (bx + 20, by + 16 + lh), val, font_val, (255, 255, 255, 255), 2)
+
+        out_pil = Image.alpha_composite(base_pil, overlay)
+        return np.array(out_pil.convert("RGB"))
+
+    except Exception as e:
+        safe_print(f"⚠️ apply_fact_callout_overlay notice: {e}")
         return frame

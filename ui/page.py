@@ -369,15 +369,28 @@ def render_page(sidebar_data: dict, api_keys: dict, keys_ready: bool):
         f"Starting video render..."
     )
 
-    # Show scene breakdown before render
-    with st.expander("🎬 Scene Breakdown", expanded=False):
+    # ── Phase 1 Testing Dashboard: Show full scene breakdown before render ─────
+    with st.expander("📊 Phase 1 Breakdown & Kinetic Data Callout Testing Dashboard", expanded=True):
+        if scenes and scenes[0].get("intro"):
+            intro_info = scenes[0]["intro"]
+            st.markdown(f"#### 🎬 Extracted Video Intro Title: **\"{intro_info.get('title', 'PIXELAB')}\"**")
+            st.caption(f"🏷️ **Tagline:** *{intro_info.get('subtitle', '')}*")
+
         for i, sc in enumerate(scenes, start=1):
-            st.markdown(
-                f"**Scene {i}** ({sc['start_sec']:.1f}s – {sc['end_sec']:.1f}s, "
-                f"{sc['end_sec']-sc['start_sec']:.1f}s) | "
-                f"🔍 `{sc['search_query']}` | "
-                f"*\"{sc['narration'][:80]}...\"*"
-            )
+            dur = sc['end_sec'] - sc['start_sec']
+            chap_t = sc.get('chapter_title', f'PART {i} OVERVIEW')
+            c_head, c_body = st.columns([1, 4])
+            with c_head:
+                st.markdown(f"**Scene {i}**  \n⏱️ `{sc['start_sec']:.1f}s – {sc['end_sec']:.1f}s` (`{dur:.1f}s`)")
+            with c_body:
+                st.markdown(f"📌 **Title (3-4 words):** `{chap_t}`")
+                st.markdown(f"📜 **Narration:** *\"{sc['narration']}\"*")
+                st.caption(f"🔍 **Stock Query:** `{sc['search_query']}`")
+
+                fc = sc.get("fact_card")
+                if fc and isinstance(fc, dict):
+                    st.info(f"📊 **Kinetic Data Callout (Peak {fc.get('peak_time', 'midway')}):** `{fc.get('label', 'STAT')}: {fc.get('value', '')}`")
+            st.divider()
 
     # ── Phase: Build video ─────────────────────────────────────────────
     tracker = ProgressTracker(scene_count)
