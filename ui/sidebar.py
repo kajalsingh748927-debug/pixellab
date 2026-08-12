@@ -208,9 +208,30 @@ def render_sidebar() -> dict:
                 ],
                 index=0,
             )
-            size_scale = st.slider("Font Scale", 0.5, 2.0, float(sub_pkg_defaults.get("size_scale", 1.0)), 0.05)
-            letter_spacing = st.slider("Letter Spacing (px)", 0, 10, int(sub_pkg_defaults.get("letter_spacing", 0)), 1)
-            word_spacing = st.slider("Word Spacing (px)", 0, 30, int(sub_pkg_defaults.get("word_spacing", 10)), 1)
+            st.markdown("**Text Size & Spacing Controls**")
+            size_preset = st.radio(
+                "Quick Text Size Presets",
+                ["🔍 Small (0.8x)", "💬 Normal (1.2x)", "🔥 Large (1.6x)", "💥 Extra Large (2.2x)", "🚀 Giant (3.5x)", "Custom Slider"],
+                index=5,
+                horizontal=True,
+            )
+            preset_scale_map = {
+                "🔍 Small (0.8x)": 0.80,
+                "💬 Normal (1.2x)": 1.20,
+                "🔥 Large (1.6x)": 1.60,
+                "💥 Extra Large (2.2x)": 2.20,
+                "🚀 Giant (3.5x)": 3.50,
+            }
+            default_scale = preset_scale_map.get(size_preset, float(sub_pkg_defaults.get("size_scale", 1.40)))
+
+            size_scale = st.slider(
+                "Font Scale (Text Size)",
+                0.30, 4.00, default_scale, 0.05,
+                help="Adjust subtitle text size from micro (0.3x) to giant (4.0x)!"
+            )
+            letter_spacing = st.slider("Letter Spacing (px)", 0, 15, int(sub_pkg_defaults.get("letter_spacing", 0)), 1)
+            word_spacing = st.slider("Word Spacing (px)", 0, 40, int(sub_pkg_defaults.get("word_spacing", 10)), 1)
+            max_width_pct = st.slider("Text Max Screen Width (%)", 40, 100, 85, 5, help="Controls horizontal wrapping boundary for text")
 
         # ── EXPANDER 2: POSITIONING & LAYOUT ──
         with st.expander("📍 Positioning & Text Layout", expanded=False):
@@ -277,6 +298,66 @@ def render_sidebar() -> dict:
             active_color_hex = st.color_picker("Active Word Color", "#FFEB3B")
             inactive_color_hex = st.color_picker("Inactive Word Color", "#FFFFFF")
 
+        # ── EXPANDER 8: FACT TEXT OVERLAY (NO-BOX TEXT) ──
+        with st.expander("📊 Fact Text Overlay (No-Box Styled Text)", expanded=False):
+            enable_fact_text_overlay = st.checkbox("Enable Fact Text Overlay", value=True)
+            fact_font_family = st.selectbox(
+                "Fact Font Family",
+                [
+                    "🍿 DejaVu Sans Bold (Default)",
+                    "💥 Impact (Heavy Viral Bold)",
+                    "🅰️ Arial Black (Modern Bold)",
+                    "⚡ Trebuchet (Kinetic Dynamic)",
+                    "📖 Georgia (Cinematic Serif)",
+                    "🗯️ Comic Sans (Fun & Casual)",
+                    "🖥️ Courier New (Retro Monospace)",
+                    "📜 Times New Roman (Classic)",
+                    "✨ Verdana (Clean Ultra-Readable)",
+                    "🔹 Tahoma (Crisp Tech)",
+                    "📱 Segoe UI (Modern UI)",
+                ],
+                index=0,
+            )
+            col_fs1, col_fs2 = st.columns(2)
+            with col_fs1:
+                fact_font_scale = st.slider("Fact Font Scale", 0.5, 2.5, 1.0, 0.1)
+                fact_fill_style = st.selectbox("Fill Style", ["solid", "gradient"], index=0)
+            with col_fs2:
+                if fact_fill_style == "solid":
+                    fact_color_hex = st.color_picker("Fact Text Color", "#FFFFFF")
+                    fact_grad1_hex = "#FFD700"
+                    fact_grad2_hex = "#FF7828"
+                else:
+                    fact_color_hex = "#FFFFFF"
+                    fact_grad1_hex = st.color_picker("Gradient Stop 1", "#FFD700")
+                    fact_grad2_hex = st.color_picker("Gradient Stop 2", "#FF7828")
+
+            col_fp1, col_fp2 = st.columns(2)
+            with col_fp1:
+                fact_position = st.selectbox("Position", ["Bottom", "Top", "Center", "Custom"], index=0)
+            with col_fp2:
+                fact_custom_y_percent = st.slider("Custom Y Offset (%)", 0.0, 100.0, 80.0, 1.0) if fact_position == "Custom" else 80.0
+
+            col_ft1, col_ft2 = st.columns(2)
+            with col_ft1:
+                fact_start_tracking = st.slider("Start Tracking (px)", 10, 60, 30, 2)
+            with col_ft2:
+                fact_end_tracking = st.slider("End Tracking (px)", 0, 20, 6, 1)
+
+            col_fa1, col_fa2 = st.columns(2)
+            with col_fa1:
+                fact_entrance_animation = st.selectbox("Entrance Animation", ["tracking", "fade", "slide_up", "slide_down", "word_reveal"], index=0)
+            with col_fa2:
+                fact_exit_animation = st.selectbox("Exit Animation", ["fade", "slide_up", "slide_down", "none"], index=0)
+
+            col_leg1, col_leg2 = st.columns(2)
+            with col_leg1:
+                fact_outline_width = st.slider("Outline Width (px)", 2, 8, 3, 1)
+            with col_leg2:
+                fact_shadow_opacity = st.slider("Shadow Opacity", 0.3, 1.0, 0.6, 0.05)
+
+            fact_display_duration = st.slider("Display Duration (sec)", 1.0, 6.0, 2.5, 0.5)
+
         enable_fact_cards = st.checkbox("📊 Enable AI Fact Cards & Stat Callouts", value=True)
 
         st.divider()
@@ -298,7 +379,7 @@ def render_sidebar() -> dict:
         st.divider()
 
         # ── 5. INTRO / OUTRO / CARDS ─────────────────────────
-        st.header("🎬 Intro / Outro / Cards")
+        st.header("🎬 Intro / Outro / Cards (Full Typography Control)")
 
         overlay_preset_choice = st.selectbox(
             "🎨 Master Title Theme Preset",
@@ -309,7 +390,25 @@ def render_sidebar() -> dict:
 
         auto_color_from_video = st.checkbox("🎯 Auto-Extract Color from Video Frame", value=False, help="Dynamically samples dominant color from video clips to auto-style accent colors!")
 
-        with st.expander("🎬 Intro Title Card", expanded=False):
+        card_font_family = st.selectbox(
+            "🔤 Title Cards Font Family",
+            [
+                "🍿 DejaVu Sans Bold (Default)",
+                "💥 Impact (Heavy Viral Bold)",
+                "🅰️ Arial Black (Modern Bold)",
+                "⚡ Trebuchet (Kinetic Dynamic)",
+                "📖 Georgia (Cinematic Serif)",
+                "🗯️ Comic Sans (Fun & Casual)",
+                "🖥️ Courier New (Retro Monospace)",
+                "📜 Times New Roman (Classic)",
+                "✨ Verdana (Clean Ultra-Readable)",
+                "🔹 Tahoma (Crisp Tech)",
+                "📱 Segoe UI (Modern UI)",
+            ],
+            index=0,
+        )
+
+        with st.expander("🎬 Intro Title Card Settings", expanded=False):
             show_intro = st.checkbox("Enable Intro Card", value=True)
             intro_duration = st.slider("Intro Duration (sec)", 2.0, 6.0, 4.0, 0.5)
             intro_style_override = st.selectbox(
@@ -317,11 +416,19 @@ def render_sidebar() -> dict:
                 ["AI Auto-Pick", "Blur to Sharp", "Neon Trace", "Split Reveal", "Glow Reveal", "Particle Assemble", "Cinematic Scale", "Typewriter"],
                 index=0
             )
-            col_t1, col_t2 = st.columns(2)
-            with col_t1:
-                intro_start_tracking = st.slider("Start Tracking (px)", 10, 60, 36, 2, help="Letters start wide apart on reveal")
-            with col_t2:
-                intro_end_tracking = st.slider("End Tracking (px)", 0, 20, 8, 1, help="Letters compress inward to settled spacing")
+            intro_position = st.selectbox(
+                "Intro Screen Position",
+                ["Center", "Upper Third", "Lower Third"],
+                index=0
+            )
+            col_is1, col_is2 = st.columns(2)
+            with col_is1:
+                intro_title_size_scale = st.slider("Intro Font Scale", 0.30, 4.00, 1.20, 0.05, help="Scales main title text size from micro (0.3x) to giant (4.0x)")
+                intro_word_spacing = st.slider("Intro Word Spacing (px)", 0, 50, 10, 1)
+            with col_is2:
+                intro_line_gap = st.slider("Title / Subtitle Gap (px)", 0, 50, 16, 2)
+                intro_start_tracking = st.slider("Start Tracking (px)", 10, 60, 24, 2, help="Letters start wide apart on reveal")
+                intro_end_tracking = st.slider("End Tracking (px)", 0, 30, 6, 1, help="Letters compress inward to settled spacing")
 
             col_g1, col_g2 = st.columns(2)
             with col_g1:
@@ -332,13 +439,31 @@ def render_sidebar() -> dict:
             intro_glow_color = st.color_picker("Glow Color", "#FF8C00")
             intro_glow_radius = st.slider("Glow Intensity", 0, 30, 18)
             intro_show_subtitle = st.checkbox("Show Subtitle Tagline", True)
-            intro_subtitle_color = st.color_picker("Subtitle Color", "#9999CC")
+            col_sub1, col_sub2 = st.columns(2)
+            with col_sub1:
+                intro_subtitle_size_scale = st.slider("Subtitle Font Scale", 0.30, 4.00, 1.20, 0.05, help="Increase or decrease tagline font size (0.3x to 4.0x)")
+                intro_subtitle_color = st.color_picker("Subtitle Color", "#9999CC")
+            with col_sub2:
+                intro_subtitle_letter_spacing = st.slider("Subtitle Tracking (px)", 0, 30, 2, 1)
 
-        with st.expander("📖 Chapter Title Cards", expanded=False):
+        with st.expander("📖 Chapter Title Cards Settings", expanded=False):
             show_chapters = st.checkbox("Enable Chapter Cards", value=True)
             chapter_style = st.selectbox(
                 "Animation",
-                ["Bracket Frame", "Underline Draw", "Slide Horizontal", "Slide Vertical", "Fade", "Wipe"],
+                [
+                    "Bracket Frame",
+                    "Underline Draw",
+                    "Slide Horizontal",
+                    "Slide Vertical",
+                    "Fade",
+                    "Wipe",
+                    "Blur to Sharp",
+                    "Glow Pulse Border",
+                    "Holographic HUD Scan",
+                    "Split Center Zoom",
+                    "Kinetic Bounce Pop",
+                    "Neon Outline Trace",
+                ],
                 index=0
             )
             chapter_position = st.selectbox(
@@ -346,17 +471,60 @@ def render_sidebar() -> dict:
                 ["Center", "Lower Third", "Upper Third"],
                 index=0
             )
+            col_cs1, col_cs2 = st.columns(2)
+            with col_cs1:
+                chapter_font_scale = st.slider("Chapter Font Scale", 0.30, 4.00, 1.20, 0.05, help="Increase or decrease chapter font size")
+                chapter_word_spacing = st.slider("Chapter Word Spacing (px)", 0, 50, 10, 1)
+            with col_cs2:
+                chapter_letter_spacing = st.slider("Chapter Letter Spacing (px)", 0, 30, 4, 1)
             chapter_bg_color = st.color_picker("Card Background", "#0F172A")
             chapter_bg_opacity = st.slider("Card Opacity", 0, 255, 200)
             chapter_text_color = st.color_picker("Text Color", "#FFFFFF")
             chapter_accent_color = st.color_picker("Accent / Line Color", "#FFA028")
             chapter_show_lines = st.checkbox("Show Decorative Lines", True)
 
-        with st.expander("🎬 Outro Card", expanded=False):
+        with st.expander("🎬 Outro Card Settings", expanded=False):
             show_outro = st.checkbox("Enable Outro Card", value=True)
             outro_duration = st.slider("Outro Duration (sec)", 2.0, 6.0, 4.0, 0.5)
-            outro_channel_name = st.text_input("Channel Name", "@YourChannel")
-            outro_cta_override = st.text_input("CTA Text Override (blank = AI picks)", "")
+            outro_style_override = st.selectbox(
+                "Animation Style",
+                ["AI Auto-Pick", "Blur to Sharp", "Neon Trace", "Split Reveal", "Glow Reveal", "Particle Assemble", "Cinematic Scale", "Typewriter"],
+                index=0,
+                key="outro_style_sel"
+            )
+            outro_position = st.selectbox(
+                "Outro Screen Position",
+                ["Center", "Upper Third", "Lower Third"],
+                index=0
+            )
+            outro_heading_override = st.text_input("Main Heading Text (blank = THANKS FOR WATCHING!)", "", help="Type any custom heading text to show on Outro card instead of default THANKS FOR WATCHING!")
+            outro_cta_override = st.text_input("CTA Subtitle Text (blank = AI picks)", "", help="Type custom call-to-action tagline (e.g., LIKE & SUBSCRIBE FOR MORE)")
+            outro_channel_name = st.text_input("Channel Name / Handle", "@YourChannel")
+
+            st.markdown("###### 📏 Independent Section Text Size Controls")
+            col_os1, col_os2 = st.columns(2)
+            with col_os1:
+                outro_font_scale = st.slider("Top Heading Scale", 0.30, 4.00, 1.10, 0.05, help="Increase or decrease Top Heading text size")
+                outro_btn_scale = st.slider("Subscribe Button Scale", 0.30, 3.00, 1.00, 0.05, help="Increase or decrease Subscribe button size")
+                outro_channel_scale = st.slider("Channel Handle Scale", 0.30, 3.00, 1.00, 0.05, help="Increase or decrease Channel Handle size")
+                outro_word_spacing = st.slider("Outro Word Spacing (px)", 0, 50, 10, 1)
+            with col_os2:
+                outro_cta_scale = st.slider("Middle Subtitle Scale", 0.30, 3.00, 0.85, 0.05, help="Increase or decrease Middle Subtitle text size")
+                outro_badges_scale = st.slider("Bottom Badges Scale", 0.30, 3.00, 1.00, 0.05, help="Increase or decrease Bottom Badges text size")
+                outro_line_gap = st.slider("Heading / CTA Gap (px)", 0, 50, 16, 2)
+
+            outro_start_tracking = st.slider("Start Tracking (px)", 10, 60, 24, 2, help="Letters start wide apart on reveal", key="outro_start_track")
+            outro_end_tracking = st.slider("End Tracking (px)", 0, 30, 6, 1, help="Letters compress inward to settled spacing", key="outro_end_track")
+
+            col_og1, col_og2 = st.columns(2)
+            with col_og1:
+                outro_grad_stop1 = st.color_picker("Text Gradient Stop 1", "#FFD700", key="outro_g1")
+            with col_og2:
+                outro_grad_stop2 = st.color_picker("Text Gradient Stop 2", "#FF7828", key="outro_g2")
+
+            outro_glow_color = st.color_picker("Glow Color", "#FF8C00", key="outro_glow_c")
+            outro_glow_radius = st.slider("Glow Intensity", 0, 30, 18, key="outro_glow_r")
+
             outro_show_subscribe = st.checkbox("Show Subscribe Button", True)
             outro_show_like = st.checkbox("Show Like & Share", True)
             outro_accent_color = st.color_picker("Accent Color", "#FF7828")
@@ -402,6 +570,7 @@ def render_sidebar() -> dict:
         "size_scale":       size_scale,
         "letter_spacing":   letter_spacing,
         "word_spacing":     word_spacing,
+        "max_width_pct":   max_width_pct,
         "position":         sub_position,
         "custom_y_pct":     custom_y_pct,
         "layout_mode":      layout_mode,
@@ -412,8 +581,8 @@ def render_sidebar() -> dict:
         "stroke_style":     stroke_style,
         "stroke_width":     stroke_width,
         "stroke_color":     stroke_rgb,
-        "active_color":     active_rgb if subtitle_package == "Custom (Manual Controls)" else sub_pkg_defaults.get("active_color", active_rgb),
-        "inactive_color":   inactive_rgb if subtitle_package == "Custom (Manual Controls)" else sub_pkg_defaults.get("inactive_color", inactive_rgb),
+        "active_color":     active_rgb,
+        "inactive_color":   inactive_rgb,
         "shadow": {
             "offset_x": shadow_offset_x,
             "offset_y": shadow_offset_y,
@@ -427,7 +596,21 @@ def render_sidebar() -> dict:
             "opacity": glow_opacity,
         } if enable_glow else None,
 
+        # Fact Text Overlay Settings
+        "enable_fact_text_overlay": enable_fact_text_overlay,
         "enable_fact_cards": enable_fact_cards,
+        "fact_font_family": fact_font_family,
+        "fact_font_scale": fact_font_scale,
+        "fact_fill_style": fact_fill_style,
+        "fact_color": hex_to_rgb_tuple(fact_color_hex),
+        "fact_gradient": (hex_to_rgb_tuple(fact_grad1_hex), hex_to_rgb_tuple(fact_grad2_hex)),
+        "fact_position": fact_position,
+        "fact_custom_y_pct": fact_custom_y_percent,
+        "start_tracking": fact_start_tracking,
+        "end_tracking": fact_end_tracking,
+        "entrance_animation": fact_entrance_animation,
+        "exit_animation": fact_exit_animation,
+        "outline_width": fact_outline_width,
 
         # VFX
         "enable_auto_framing": enable_auto_framing,
@@ -460,11 +643,16 @@ def render_sidebar() -> dict:
         # Title Cards & Motion Graphics Settings
         "overlay_preset": overlay_preset_choice,
         "auto_color_from_video": auto_color_from_video,
+        "card_font_family": card_font_family,
 
         # Intro Card Settings
         "show_intro": show_intro,
         "intro_duration": intro_duration,
         "intro_style_override": None if intro_style_override == "AI Auto-Pick" else intro_style_override.lower().replace(" ", "_"),
+        "intro_position": intro_position,
+        "intro_title_size_scale": intro_title_size_scale,
+        "intro_word_spacing": intro_word_spacing,
+        "intro_line_gap": intro_line_gap,
         "intro_start_tracking": intro_start_tracking,
         "intro_end_tracking": intro_end_tracking,
         "gradient_colors": (hex_to_rgb_tuple(grad_stop1), hex_to_rgb_tuple(grad_stop2)),
@@ -472,11 +660,16 @@ def render_sidebar() -> dict:
         "intro_glow_radius": intro_glow_radius,
         "intro_show_subtitle": intro_show_subtitle,
         "intro_subtitle_color": hex_to_rgb_tuple(intro_subtitle_color),
+        "intro_subtitle_size_scale": intro_subtitle_size_scale,
+        "intro_subtitle_letter_spacing": intro_subtitle_letter_spacing,
 
         # Chapter Title Cards Settings
         "show_chapter_cards": show_chapters,
         "chapter_card_style": chapter_style.lower().replace(" ", "_"),
         "chapter_card_position": chapter_position.lower().replace(" ", "_"),
+        "chapter_font_scale": chapter_font_scale,
+        "chapter_word_spacing": chapter_word_spacing,
+        "chapter_letter_spacing": chapter_letter_spacing,
         "chapter_card_bg_color": hex_to_rgb_tuple(chapter_bg_color) + (chapter_bg_opacity,),
         "chapter_card_text_color": hex_to_rgb_tuple(chapter_text_color),
         "chapter_card_accent_color": hex_to_rgb_tuple(chapter_accent_color),
@@ -485,6 +678,21 @@ def render_sidebar() -> dict:
         # Outro Card Settings
         "show_outro": show_outro,
         "outro_duration": outro_duration,
+        "outro_style_override": None if outro_style_override == "AI Auto-Pick" else outro_style_override.lower().replace(" ", "_"),
+        "outro_position": outro_position,
+        "outro_thanks_text": outro_heading_override if outro_heading_override else None,
+        "outro_font_scale": outro_font_scale,
+        "outro_cta_scale": outro_cta_scale,
+        "outro_btn_scale": outro_btn_scale,
+        "outro_badges_scale": outro_badges_scale,
+        "outro_channel_scale": outro_channel_scale,
+        "outro_word_spacing": outro_word_spacing,
+        "outro_line_gap": outro_line_gap,
+        "outro_start_tracking": outro_start_tracking,
+        "outro_end_tracking": outro_end_tracking,
+        "outro_gradient_colors": (hex_to_rgb_tuple(outro_grad_stop1), hex_to_rgb_tuple(outro_grad_stop2)),
+        "outro_glow_color": hex_to_rgb_tuple(outro_glow_color),
+        "outro_glow_radius": outro_glow_radius,
         "outro_channel_name": outro_channel_name,
         "outro_cta_override": outro_cta_override if outro_cta_override else None,
         "outro_show_subscribe": outro_show_subscribe,

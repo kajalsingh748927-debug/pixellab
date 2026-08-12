@@ -144,7 +144,7 @@ def render_background_depth_treatment(frame: np.ndarray, center_pos: tuple, bloc
 def apply_intro_overlay(frame: np.ndarray, t: float, intro_data: dict, config: dict) -> np.ndarray:
     """
     Draws Intro Title & Subtitle with TextStyle, tracking compression keyframes,
-    gradient fills, outer neon glow, and 7 animation styles over real video frame.
+    gradient fills, outer neon glow, multi-line auto-wrapping, and animation styles.
     """
     duration = float(config.get("intro_duration", 4.0))
     if t > duration:
@@ -176,16 +176,14 @@ def apply_intro_overlay(frame: np.ndarray, t: float, intro_data: dict, config: d
             grad_colors = config.get("gradient_colors", preset.get("gradient_colors", ((255, 215, 0), (255, 120, 40))))
             accent_color = grad_colors[0]
 
-        start_tracking = int(config.get("intro_start_tracking", preset.get("intro_start_tracking", 36)))
-        end_tracking = int(config.get("intro_end_tracking", preset.get("intro_end_tracking", 8)))
+        start_tracking = int(config.get("intro_start_tracking", preset.get("intro_start_tracking", 24)))
+        end_tracking = int(config.get("intro_end_tracking", preset.get("intro_end_tracking", 6)))
         bg_depth_style = config.get("bg_depth_treatment", preset.get("bg_depth_treatment", "vignette_patch"))
 
-        title_font_size = max(28, int(h * 0.09 * float(config.get("intro_title_size_scale", 1.0))))
-        subtitle_font_size = max(18, int(h * 0.04))
+        font_scale_user = float(config.get("intro_title_size_scale", 1.1))
+        sub_font_scale_user = float(config.get("intro_subtitle_size_scale", 1.1))
 
-        font_file = config.get("font", preset.get("font", "DejaVuSans-Bold.ttf"))
-        font_title = get_cached_font(font_file, title_font_size)
-        font_sub = get_cached_font("DejaVuSans.ttf", subtitle_font_size)
+        font_file = config.get("card_font_family") or config.get("font") or preset.get("font", "DejaVuSans-Bold.ttf")
 
         # Entrance progress ratio (0 to 1 over first 0.6s)
         anim_dur = min(0.7, duration * 0.4)
@@ -195,115 +193,125 @@ def apply_intro_overlay(frame: np.ndarray, t: float, intro_data: dict, config: d
         # Animatable Tracking Compression: wide -> settled
         cur_tracking = int(start_tracking + (end_tracking - start_tracking) * e_p)
 
-        # Measure text block
+        # Max width constraint (80% of screen width)
+        max_title_w = int(w * 0.80)
+
+        # Dynamic Font Size Auto-Fit Calculation
+        base_size = max(32, int(h * 0.080 * font_scale_user))
+        font_title = get_cached_font(font_file, base_size)
+
         test_pil = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         test_draw = ImageDraw.Draw(test_pil)
-        title_w, title_h = measure_text_with_spacing(test_draw, title, font_title, cur_tracking)
-        sub_w, sub_h = measure_text_with_spacing(test_draw, subtitle, font_sub, 2) if subtitle else (0, 0)
+
+        # Word-wrapping for Title
+        words = title.split()
+        title_lines = []
+        cur_line_words = []
+        for word in words:
+            test_str = " ".join(cur_line_words + [word])
+            tw, _ = measure_text_with_spacing(test_draw, test_str, font_title, cur_tracking)
+            if tw <= max_title_w or not cur_line_words:
+                cur_line_words.append(word)
+            else:
+                title_lines.append(" ".join(cur_line_words))
+                cur_line_words = [word]
+        if cur_line_words:
+            title_lines.append(" ".join(cur_line_words))
+
+        # Check if single line is still too wide and shrink font if needed
+        for line in title_lines:
+            lw, _ = measure_text_with_spacing(test_draw, line, font_title, cur_tracking)
+            if lw > max_title_w:
+                fit_ratio = max_title_w / float(lw)
+                base_size = max(24, int(base_size * fit_ratio))
+                font_title = get_cached_font(font_file, base_size)
+                break
+
+        # Re-measure wrapped title lines
+        measured_lines = [measure_text_with_spacing(test_draw, line, font_title, cur_tracking) for line in title_lines]
+        max_line_w = max(m[0] for m in measured_lines) if measured_lines else 0
+        line_h = max(m[1] for m in measured_lines) if measured_lines else 30
+        line_gap = 14
+
+        total_title_h = len(title_lines) * line_h + max(0, len(title_lines) - 1) * line_gap
+
+        # Subtitle Tagline Measuring & Auto-Wrapping
+        sub_font_size = max(20, int(h * 0.045 * sub_font_scale_user))
+        font_sub = get_cached_font(font_file, sub_font_size)
+
+        sub_words = subtitle.split()
+        sub_lines = []
+        cur_sub_words = []
+        for w_sub in sub_words:
+            test_sub = " ".join(cur_sub_words + [w_sub])
+            sw, _ = measure_text_with_spacing(test_draw, test_sub, font_sub, 2)
+            if sw <= max_title_w or not cur_sub_words:
+                cur_sub_words.append(w_sub)
+            else:
+                sub_lines.append(" ".join(cur_sub_words))
+                cur_sub_words = [w_sub]
+        if cur_sub_words:
+            sub_lines.append(" ".join(cur_sub_words))
+
+        measured_sub_lines = [measure_text_with_spacing(test_draw, line, font_sub, 2) for line in sub_lines]
+        sub_line_h = max(m[1] for m in measured_sub_lines) if measured_sub_lines else 20
 
         center_x, center_y = w // 2, h // 2
-        title_y = center_y - (title_h // 2)
+        start_title_y = center_y - (total_title_h // 2) - 15
 
         # 1. Background Depth Layer
-        frame = render_background_depth_treatment(frame, (center_x, center_y), (title_w, title_h + 80), bg_depth_style, accent_color, t=t)
+        frame = render_background_depth_treatment(frame, (center_x, center_y), (max_line_w, total_title_h + 100), bg_depth_style, accent_color, t=t)
 
         base_pil = Image.fromarray(frame).convert("RGBA")
         overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay)
 
         title_alpha = int(255 * clamp(t / 0.4))
-        draw_x = center_x - (title_w // 2)
 
-        # 2. Render Animation Modes
-        if anim_style == "blur_to_sharp":
-            # Heavy initial blur + scale settle
-            blur_r = int(16.0 * (1.0 - ease_out_quad(anim_p)))
-            scale = 1.25 - 0.25 * e_p
-            s_size = max(24, int(title_font_size * scale))
-            s_font = get_cached_font(font_file, s_size)
-            sw, sh = measure_text_with_spacing(draw, title, s_font, cur_tracking)
-            sx, sy = center_x - (sw // 2), title_y - int((sh - title_h) / 2)
+        # 2. Render Wrapped Title Lines
+        for l_idx, line_str in enumerate(title_lines):
+            lw, lh = measured_lines[l_idx]
+            line_y = start_title_y + l_idx * (line_h + line_gap)
+            draw_x = center_x - (lw // 2)
 
-            t_layer = render_gradient_text(w, h, title, s_font, (sx, sy), grad_colors, angle=45, letter_spacing=cur_tracking, alpha=title_alpha)
-            if blur_r > 0:
-                t_layer = t_layer.filter(ImageFilter.GaussianBlur(radius=blur_r))
+            t_layer = render_gradient_text(w, h, line_str, font_title, (draw_x, line_y), grad_colors, angle=45, letter_spacing=cur_tracking, alpha=title_alpha)
+
+            if anim_style == "blur_to_sharp" and anim_p < 1.0:
+                blur_r = int(14.0 * (1.0 - ease_out_quad(anim_p)))
+                if blur_r > 0:
+                    t_layer = t_layer.filter(ImageFilter.GaussianBlur(radius=blur_r))
+
             overlay = Image.alpha_composite(overlay, t_layer)
             draw = ImageDraw.Draw(overlay)
 
-        elif anim_style == "split_reveal":
-            # Two halves slide in from left & right, snapping together at center
-            mid_i = len(title) // 2
-            left_half, right_half = title[:mid_i], title[mid_i:]
-
-            lw, _ = measure_text_with_spacing(draw, left_half, font_title, cur_tracking)
-            rw, _ = measure_text_with_spacing(draw, right_half, font_title, cur_tracking)
-
-            off_left = int(-w * 0.4 * (1.0 - e_p))
-            off_right = int(w * 0.4 * (1.0 - e_p))
-
-            lx = draw_x + off_left
-            rx = draw_x + lw + off_right
-
-            t_left = render_gradient_text(w, h, left_half, font_title, (lx, title_y), grad_colors, angle=45, letter_spacing=cur_tracking, alpha=title_alpha)
-            t_right = render_gradient_text(w, h, right_half, font_title, (rx, title_y), grad_colors, angle=45, letter_spacing=cur_tracking, alpha=title_alpha)
-            overlay = Image.alpha_composite(overlay, t_left)
-            overlay = Image.alpha_composite(overlay, t_right)
-            draw = ImageDraw.Draw(overlay)
-
-        elif anim_style == "neon_trace":
-            # Outline path draws progressively, then solid gradient fills
-            reveal_p = clamp(anim_p * 1.4)
-            n_chars = len(title)
-            visible_chars = max(1, int(n_chars * reveal_p))
-            traced_txt = title[:visible_chars]
-            tw, _ = measure_text_with_spacing(draw, traced_txt, font_title, cur_tracking)
-
-            # Stroke trace
-            draw_text_with_spacing(draw, (draw_x, title_y), traced_txt, font_title, (accent_color[0], accent_color[1], accent_color[2], title_alpha), cur_tracking)
-            if anim_p > 0.5:
-                t_layer = render_gradient_text(w, h, title, font_title, (draw_x, title_y), grad_colors, angle=45, letter_spacing=cur_tracking, alpha=int(title_alpha * (anim_p - 0.5) * 2))
-                overlay = Image.alpha_composite(overlay, t_layer)
+            # Outer Neon Glow Layer
+            if config.get("glow", True) and title_alpha > 10:
+                glow_radius = max(4, int(config.get("intro_glow_radius", preset.get("intro_glow_radius", 18))))
+                glow_layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+                g_draw = ImageDraw.Draw(glow_layer)
+                draw_text_with_spacing(g_draw, (draw_x, line_y), line_str, font_title, (accent_color[0], accent_color[1], accent_color[2], 220), cur_tracking)
+                blurred_glow = glow_layer.filter(ImageFilter.GaussianBlur(radius=glow_radius))
+                overlay = Image.alpha_composite(blurred_glow, overlay)
                 draw = ImageDraw.Draw(overlay)
 
-        elif anim_style == "particle_assemble":
-            cur_x = draw_x
-            for idx, char in enumerate(title):
-                bbox = draw.textbbox((0, 0), char, font=font_title)
-                cw = bbox[2] - bbox[0]
-                random.seed(idx * 888)
-                off_x = int((random.randint(-140, 140)) * (1.0 - e_p))
-                off_y = int((random.randint(-160, 160)) * (1.0 - e_p))
-
-                c_alpha = int(255 * clamp(anim_p * 1.5))
-                t_char = render_gradient_text(w, h, char, font_title, (cur_x + off_x, title_y + off_y), grad_colors, angle=45, letter_spacing=0, alpha=c_alpha)
-                overlay = Image.alpha_composite(overlay, t_char)
-                cur_x += cw + cur_tracking
-            draw = ImageDraw.Draw(overlay)
-
-        else:  # glow_reveal (Default)
-            t_layer = render_gradient_text(w, h, title, font_title, (draw_x, title_y), grad_colors, angle=45, letter_spacing=cur_tracking, alpha=title_alpha)
-            overlay = Image.alpha_composite(overlay, t_layer)
-            draw = ImageDraw.Draw(overlay)
-
-        # 3. Outer Neon Glow Bloom Layer
-        if config.get("glow", True) and title_alpha > 10:
-            glow_radius = max(4, int(config.get("intro_glow_radius", preset.get("intro_glow_radius", 18))))
-            glow_layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-            g_draw = ImageDraw.Draw(glow_layer)
-            draw_text_with_spacing(g_draw, (draw_x, title_y), title, font_title, (accent_color[0], accent_color[1], accent_color[2], 220), cur_tracking)
-            blurred_glow = glow_layer.filter(ImageFilter.GaussianBlur(radius=glow_radius))
-            overlay = Image.alpha_composite(blurred_glow, overlay)
-            draw = ImageDraw.Draw(overlay)
-
-        # 4. Subtitle Tagline (70px below title)
-        if subtitle and sub_w > 0:
+        # 3. Subtitle Tagline
+        if sub_lines and sub_line_h > 0:
             sub_p = clamp((t - 0.3) / max(0.4, duration * 0.3))
             sub_alpha = int(255 * sub_p)
             if sub_alpha > 0:
-                sub_x = center_x - (sub_w // 2)
-                sub_y = title_y + title_h + int(h * 0.065)
-                draw_text_with_spacing(draw, (sub_x + 3, sub_y + 3), subtitle, font_sub, (0, 0, 0, int(sub_alpha * 0.8)), 2)
-                draw_text_with_spacing(draw, (sub_x, sub_y), subtitle, font_sub, (240, 240, 255, sub_alpha), 2)
+                sub_color = config.get("intro_subtitle_color", (240, 240, 255))
+                sub_rgb = sub_color[:3] if isinstance(sub_color, (tuple, list)) else (240, 240, 255)
+                sub_tracking = int(config.get("intro_subtitle_letter_spacing", 2))
+                line_gap_sub = int(config.get("intro_line_gap", 20))
+
+                start_sub_y = start_title_y + total_title_h + line_gap_sub
+                for sl_idx, sl_str in enumerate(sub_lines):
+                    slw, slh = measured_sub_lines[sl_idx]
+                    sl_x = center_x - (slw // 2)
+                    sl_y = start_sub_y + sl_idx * (sub_line_h + 8)
+
+                    draw_text_with_spacing(draw, (sl_x + 3, sl_y + 3), sl_str, font_sub, (0, 0, 0, int(sub_alpha * 0.85)), sub_tracking)
+                    draw_text_with_spacing(draw, (sl_x, sl_y), sl_str, font_sub, (sub_rgb[0], sub_rgb[1], sub_rgb[2], sub_alpha), sub_tracking)
 
         final_pil = Image.alpha_composite(base_pil, overlay).convert("RGB")
         return np.array(final_pil)
@@ -331,14 +339,16 @@ def apply_chapter_overlay(frame: np.ndarray, t: float, chapter_title: str, confi
         bg_rgba = config.get("chapter_card_bg_color", preset.get("chapter_card_bg_color", (0, 0, 0, 180)))
         accent_color = config.get("chapter_card_accent_color", preset.get("chapter_card_accent_color", (68, 136, 255)))
 
-        font_size = max(20, int(h * 0.065))
-        font = get_cached_font(config.get("font", preset.get("font", "DejaVuSans-Bold.ttf")), font_size)
+        font_size = max(24, int(h * 0.075 * float(config.get("chapter_font_scale", 1.1))))
+        font_file = config.get("card_font_family") or config.get("font") or preset.get("font", "DejaVuSans-Bold.ttf")
+        font = get_cached_font(font_file, font_size)
+        letter_spacing = int(config.get("chapter_letter_spacing", 2))
 
         base_pil = Image.fromarray(frame).convert("RGBA")
         overlay_pil = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay_pil)
 
-        tw, th = measure_text_with_spacing(draw, chapter_title, font, 2)
+        tw, th = measure_text_with_spacing(draw, chapter_title, font, letter_spacing)
         card_w = tw + 70
         card_h = th + 36
 
@@ -362,33 +372,86 @@ def apply_chapter_overlay(frame: np.ndarray, t: float, chapter_title: str, confi
         eff_accent = (accent_color[0], accent_color[1], accent_color[2], int(255 * alpha_scale))
 
         if anim_style == "bracket_frame":
-            # Two accent brackets [ ] slide in from left/right and frame title
             b_off = int(60 * (1.0 - p_in))
             draw.rounded_rectangle([target_x, target_y, target_x + card_w, target_y + card_h], radius=12, fill=eff_bg)
 
-            # Left Bracket [
             draw.line([(target_x - b_off + 10, target_y + 6), (target_x - b_off + 10, target_y + card_h - 6)], fill=eff_accent, width=4)
             draw.line([(target_x - b_off + 10, target_y + 6), (target_x - b_off + 24, target_y + 6)], fill=eff_accent, width=4)
             draw.line([(target_x - b_off + 10, target_y + card_h - 6), (target_x - b_off + 24, target_y + card_h - 6)], fill=eff_accent, width=4)
 
-            # Right Bracket ]
             draw.line([(target_x + card_w + b_off - 10, target_y + 6), (target_x + card_w + b_off - 10, target_y + card_h - 6)], fill=eff_accent, width=4)
             draw.line([(target_x + card_w + b_off - 24, target_y + 6), (target_x + card_w + b_off - 10, target_y + 6)], fill=eff_accent, width=4)
             draw.line([(target_x + card_w + b_off - 24, target_y + card_h - 6), (target_x + card_w + b_off - 10, target_y + card_h - 6)], fill=eff_accent, width=4)
 
-            draw_text_with_spacing(draw, (target_x + 35, target_y + 18), chapter_title, font, (255, 255, 255, int(255 * alpha_scale)), 2)
+            draw_text_with_spacing(draw, (target_x + 35, target_y + 18), chapter_title, font, (255, 255, 255, int(255 * alpha_scale)), letter_spacing)
 
         elif anim_style == "underline_draw":
-            # Accent line draws left-to-right beneath text
             line_w = int(card_w * clamp(p_in * 1.3))
             draw.rounded_rectangle([target_x, target_y, target_x + card_w, target_y + card_h], radius=12, fill=eff_bg)
             draw.line([(target_x + 15, target_y + card_h - 4), (target_x + 15 + line_w, target_y + card_h - 4)], fill=eff_accent, width=4)
-            draw_text_with_spacing(draw, (target_x + 35, target_y + 16), chapter_title, font, (255, 255, 255, int(255 * alpha_scale)), 2)
+            draw_text_with_spacing(draw, (target_x + 35, target_y + 16), chapter_title, font, (255, 255, 255, int(255 * alpha_scale)), letter_spacing)
 
-        else:  # slide_horizontal (Default)
+        elif anim_style == "slide_vertical":
+            draw_y = int(-card_h + (target_y + card_h) * p_in)
+            draw.rounded_rectangle([target_x, draw_y, target_x + card_w, draw_y + card_h], radius=12, fill=eff_bg, outline=eff_accent, width=2)
+            draw_text_with_spacing(draw, (target_x + 35, draw_y + 18), chapter_title, font, (255, 255, 255, int(255 * alpha_scale)), letter_spacing)
+
+        elif anim_style == "fade":
+            fade_alpha = int(255 * clamp(p_in * 1.5) * alpha_scale)
+            fade_bg = (bg_rgba[0], bg_rgba[1], bg_rgba[2], int((bg_rgba[3] if len(bg_rgba) > 3 else 180) * (fade_alpha / 255.0)))
+            fade_accent = (accent_color[0], accent_color[1], accent_color[2], fade_alpha)
+            draw.rounded_rectangle([target_x, target_y, target_x + card_w, target_y + card_h], radius=12, fill=fade_bg, outline=fade_accent, width=2)
+            draw_text_with_spacing(draw, (target_x + 35, target_y + 18), chapter_title, font, (255, 255, 255, fade_alpha), letter_spacing)
+
+        elif anim_style == "wipe":
+            wipe_w = int(card_w * clamp(p_in * 1.2))
+            draw.rounded_rectangle([target_x, target_y, target_x + wipe_w, target_y + card_h], radius=12, fill=eff_bg)
+            if wipe_w > 10:
+                draw.line([(target_x + wipe_w, target_y), (target_x + wipe_w, target_y + card_h)], fill=eff_accent, width=3)
+            draw_text_with_spacing(draw, (target_x + 35, target_y + 18), chapter_title, font, (255, 255, 255, int(255 * alpha_scale)), letter_spacing)
+
+        elif anim_style == "blur_to_sharp":
+            draw.rounded_rectangle([target_x, target_y, target_x + card_w, target_y + card_h], radius=12, fill=eff_bg, outline=eff_accent, width=2)
+            draw_text_with_spacing(draw, (target_x + 35, target_y + 18), chapter_title, font, (255, 255, 255, int(255 * alpha_scale)), letter_spacing)
+            if p_in < 1.0:
+                blur_r = int(12.0 * (1.0 - ease_out_quad(p_in)))
+                if blur_r > 0:
+                    overlay_pil = overlay_pil.filter(ImageFilter.GaussianBlur(radius=blur_r))
+
+        elif anim_style == "glow_pulse_border":
+            pulse = 0.85 + 0.15 * math.sin(t * 8.0)
+            p_accent = (accent_color[0], accent_color[1], accent_color[2], int(255 * pulse * alpha_scale))
+            draw.rounded_rectangle([target_x, target_y, target_x + card_w, target_y + card_h], radius=12, fill=eff_bg, outline=p_accent, width=4)
+            draw_text_with_spacing(draw, (target_x + 35, target_y + 18), chapter_title, font, (255, 255, 255, int(255 * alpha_scale)), letter_spacing)
+
+        elif anim_style == "holographic_hud_scan":
+            draw.rounded_rectangle([target_x, target_y, target_x + card_w, target_y + card_h], radius=6, fill=eff_bg, outline=eff_accent, width=2)
+            scan_y = int(target_y + (card_h * ((t * 2.0) % 1.0)))
+            draw.line([(target_x, scan_y), (target_x + card_w, scan_y)], fill=(0, 255, 255, int(180 * alpha_scale)), width=2)
+            draw_text_with_spacing(draw, (target_x + 35, target_y + 18), chapter_title, font, (0, 255, 255, int(255 * alpha_scale)), letter_spacing)
+
+        elif anim_style == "split_center_zoom" or anim_style == "kinetic_bounce_pop":
+            scale = 0.4 + 0.6 * p_in
+            scaled_w, scaled_h = int(card_w * scale), int(card_h * scale)
+            sx = target_x + (card_w - scaled_w) // 2
+            sy = target_y + (card_h - scaled_h) // 2
+            draw.rounded_rectangle([sx, sy, sx + scaled_w, sy + scaled_h], radius=12, fill=eff_bg, outline=eff_accent, width=3)
+            draw_text_with_spacing(draw, (target_x + 35, target_y + 18), chapter_title, font, (255, 255, 255, int(255 * alpha_scale)), letter_spacing)
+
+        elif anim_style == "neon_outline_trace":
+            draw.rounded_rectangle([target_x, target_y, target_x + card_w, target_y + card_h], radius=12, fill=eff_bg, outline=eff_accent, width=4)
+            glow_layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+            g_draw = ImageDraw.Draw(glow_layer)
+            g_draw.rounded_rectangle([target_x, target_y, target_x + card_w, target_y + card_h], radius=12, outline=eff_accent, width=6)
+            glow_layer = glow_layer.filter(ImageFilter.GaussianBlur(radius=10))
+            overlay_pil = Image.alpha_composite(glow_layer, overlay_pil)
+            draw = ImageDraw.Draw(overlay_pil)
+            draw_text_with_spacing(draw, (target_x + 35, target_y + 18), chapter_title, font, (255, 255, 255, int(255 * alpha_scale)), letter_spacing)
+
+        else:  # slide_horizontal (default)
             draw_x = int(-card_w + (target_x + card_w) * p_in)
             draw.rounded_rectangle([draw_x, target_y, draw_x + card_w, target_y + card_h], radius=12, fill=eff_bg, outline=eff_accent, width=2)
-            draw_text_with_spacing(draw, (draw_x + 35, target_y + 18), chapter_title, font, (255, 255, 255, int(255 * alpha_scale)), 2)
+            draw_text_with_spacing(draw, (draw_x + 35, target_y + 18), chapter_title, font, (255, 255, 255, int(255 * alpha_scale)), letter_spacing)
 
         final_pil = Image.alpha_composite(base_pil, overlay_pil).convert("RGB")
         return np.array(final_pil)
@@ -400,7 +463,8 @@ def apply_chapter_overlay(frame: np.ndarray, t: float, chapter_title: str, confi
 # ── 7. ADVANCED OUTRO CTA OVERLAY ─────────────────────────────────────────────
 def apply_outro_overlay(frame: np.ndarray, t: float, scene_duration: float, outro_data: dict, config: dict) -> np.ndarray:
     """
-    Draws Outro CTA overlay with sweeping Gradient Pulse Border and pulsing Subscribe button over real video frame.
+    Draws Outro CTA overlay with bold headings, animatable tracking compression,
+    gradient text fills, outer neon glow bloom, Subscribe button, and channel callout.
     """
     outro_dur = float(config.get("outro_duration", 4.0))
     start_t = max(0.0, scene_duration - outro_dur)
@@ -416,93 +480,177 @@ def apply_outro_overlay(frame: np.ndarray, t: float, scene_duration: float, outr
         preset = get_overlay_preset(config.get("overlay_preset", "🎬 Cinematic Warm"))
         outro_data = outro_data or {}
 
-        thanks_text = str(config.get("outro_thanks_text") or outro_data.get("thanks_text") or "THANKS FOR WATCHING!").upper().strip()
-        cta_text = str(config.get("outro_cta_override") or outro_data.get("cta_text") or "LIKE & SUBSCRIBE FOR MORE").upper().strip()
-        channel_name = str(config.get("outro_channel_name") or "@YourChannel").strip()
+        thanks_text = str(outro_data.get("thanks_text") or config.get("outro_thanks_text") or "THANKS FOR WATCHING!").upper().strip()
+        cta_text = str(outro_data.get("cta_text") or config.get("outro_cta_override") or "LIKE & SUBSCRIBE FOR MORE").upper().strip()
+        channel_name = str(outro_data.get("channel_name") or config.get("outro_channel_name") or "@YourChannel").strip()
 
-        accent_color = config.get("outro_accent_color", preset.get("outro_accent_color", (255, 0, 0)))
+        anim_style = (config.get("outro_style_override") or preset.get("outro_animation", "blur_to_sharp")).lower().replace(" ", "_")
+        pos_anchor = str(config.get("outro_position") or "Center").lower().replace(" ", "_")
+
+        # Auto Color & Gradients
+        grad_colors = config.get("outro_gradient_colors", preset.get("gradient_colors", ((255, 215, 0), (255, 120, 40))))
+        accent_color = config.get("outro_accent_color", preset.get("outro_accent_color", (255, 120, 40)))
         if isinstance(accent_color, str) and accent_color.startswith("#"):
             accent_color = hex_to_rgb(accent_color)
 
-        font_thanks_size = max(24, int(h * 0.070))
-        font_cta_size = max(18, int(h * 0.045))
-        font_channel_size = max(16, int(h * 0.040))
-        font_btn_size = max(16, int(h * 0.038))
+        start_tracking = int(config.get("outro_start_tracking", 24))
+        end_tracking = int(config.get("outro_end_tracking", 6))
+        line_gap_user = int(config.get("outro_line_gap", 16))
 
-        font_thanks = get_cached_font(config.get("font", preset.get("font", "DejaVuSans-Bold.ttf")), font_thanks_size)
-        font_cta = get_cached_font("DejaVuSans-Bold.ttf", font_cta_size)
+        outro_font_scale = float(config.get("outro_font_scale", 1.1))
+        outro_cta_scale = float(config.get("outro_cta_scale", 0.85))
+        outro_btn_scale = float(config.get("outro_btn_scale", 1.0))
+        outro_badges_scale = float(config.get("outro_badges_scale", 1.0))
+        outro_channel_scale = float(config.get("outro_channel_scale", 1.0))
+
+        # Entrance progress & tracking compression
+        anim_dur = min(0.6, outro_dur * 0.3)
+        anim_p = clamp(rel_t / anim_dur)
+        e_p = ease_out_back(anim_p)
+        cur_tracking = int(start_tracking + (end_tracking - start_tracking) * e_p)
+
+        font_file = config.get("card_font_family") or config.get("font") or preset.get("font", "DejaVuSans-Bold.ttf")
+
+        # Master & Section Base Font Sizes (Prominent, High-Impact Proportions)
+        master_scale = outro_font_scale
+        font_thanks_size = max(36, int(h * 0.100 * master_scale))
+        font_cta_size = max(28, int(h * 0.080 * master_scale * outro_cta_scale))
+        font_btn_size = max(24, int(h * 0.070 * master_scale * outro_btn_scale))
+        font_badges_size = max(22, int(h * 0.060 * master_scale * outro_badges_scale))
+        font_channel_size = max(22, int(h * 0.065 * master_scale * outro_channel_scale))
+
+        font_thanks = get_cached_font(font_file, font_thanks_size)
+        font_cta = get_cached_font(font_file, font_cta_size)
+        font_badges = get_cached_font("DejaVuSansMono-Bold.ttf", font_badges_size)
         font_channel = get_cached_font("DejaVuSansMono-Bold.ttf", font_channel_size)
 
         base_pil = Image.fromarray(frame).convert("RGBA")
         overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay)
 
-        th_w, th_h = measure_text_with_spacing(draw, thanks_text, font_thanks, 4)
-        cta_w, cta_h = measure_text_with_spacing(draw, cta_text, font_cta, 2)
-        ch_w, ch_h = measure_text_with_spacing(draw, channel_name, font_channel, 2)
+        # Word Wrapping for Heading (Cap line width to 82% Screen Width)
+        max_w = int(w * 0.84)
+        words_t = thanks_text.split()
+        thanks_lines = []
+        if words_t:
+            cur_line = []
+            for word in words_t:
+                test_l = " ".join(cur_line + [word])
+                lw, _ = measure_text_with_spacing(draw, test_l, font_thanks, cur_tracking)
+                if lw <= max_w or not cur_line:
+                    cur_line.append(word)
+                else:
+                    thanks_lines.append(" ".join(cur_line))
+                    cur_line = [word]
+            if cur_line:
+                thanks_lines.append(" ".join(cur_line))
+        else:
+            thanks_lines = [thanks_text]
+
+        # Background Depth Treatment
+        bg_patch = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        patch_draw = ImageDraw.Draw(bg_patch)
+        patch_draw.rectangle([0, int(h * 0.04), w, int(h * 0.96)], fill=(0, 0, 0, 175))
+        blurred_patch = bg_patch.filter(ImageFilter.GaussianBlur(radius=20))
+        base_pil = Image.alpha_composite(base_pil, blurred_patch)
 
         center_x = w // 2
-        cur_y = int(h * 0.18)
 
-        def draw_readable_text(draw_ctx, pos, txt, font_obj, fill_col, l_space):
+        # Dynamic Smart Vertical Alignment
+        line_gap = max(10, min(36, line_gap_user))
+        if pos_anchor == "upper_third":
+            cur_y = int(h * 0.06)
+        elif pos_anchor == "lower_third":
+            cur_y = int(h * 0.20)
+        else:
+            cur_y = int(h * 0.10)
+
+        def draw_bold_readable_text(draw_ctx, pos, txt, font_obj, fill_col, l_space):
             rx, ry = pos
             sh_col = (0, 0, 0, int(fill_col[3] * 0.85)) if len(fill_col) > 3 else (0, 0, 0, 200)
-            draw_text_with_spacing(draw_ctx, (rx + 4, ry + 4), txt, font_obj, sh_col, l_space)
-            for sx in range(-3, 4):
-                for sy in range(-3, 4):
-                    if sx*sx + sy*sy <= 9 and (sx != 0 or sy != 0):
+            r = max(1, min(4, font_obj.size // 18))
+            draw_text_with_spacing(draw_ctx, (rx + r + 1, ry + r + 1), txt, font_obj, sh_col, l_space)
+            for sx in range(-r, r + 1):
+                for sy in range(-r, r + 1):
+                    if sx*sx + sy*sy <= r*r and (sx != 0 or sy != 0):
                         draw_text_with_spacing(draw_ctx, (rx + sx, ry + sy), txt, font_obj, (0, 0, 0, fill_col[3]), l_space)
             draw_text_with_spacing(draw_ctx, (rx, ry), txt, font_obj, fill_col, l_space)
 
-        # 1. Thanks Heading
-        th_x = center_x - (th_w // 2)
-        draw_readable_text(draw, (th_x, cur_y), thanks_text, font_thanks, (255, 255, 255, alpha), 4)
-        cur_y += th_h + int(h * 0.04)
+        # 1. Main Heading Lines (Multi-line gradient + outer neon glow)
+        for t_line in thanks_lines:
+            th_w, th_h = measure_text_with_spacing(draw, t_line, font_thanks, cur_tracking)
+            th_x = center_x - (th_w // 2)
 
-        # 2. Call-To-Action Text
+            t_layer = render_gradient_text(w, h, t_line, font_thanks, (th_x, cur_y), grad_colors, angle=45, letter_spacing=cur_tracking, alpha=alpha)
+
+            if anim_style == "blur_to_sharp" and anim_p < 1.0:
+                blur_r = int(14.0 * (1.0 - ease_out_quad(anim_p)))
+                if blur_r > 0:
+                    t_layer = t_layer.filter(ImageFilter.GaussianBlur(radius=blur_r))
+
+            overlay = Image.alpha_composite(overlay, t_layer)
+            draw = ImageDraw.Draw(overlay)
+
+            # Outer Neon Glow Layer
+            if config.get("glow", True) and alpha > 10:
+                glow_radius = max(4, int(config.get("outro_glow_radius", 18)))
+                glow_color = config.get("outro_glow_color", accent_color)
+                glow_layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+                g_draw = ImageDraw.Draw(glow_layer)
+                draw_text_with_spacing(g_draw, (th_x, cur_y), t_line, font_thanks, (glow_color[0], glow_color[1], glow_color[2], 220), cur_tracking)
+                blurred_glow = glow_layer.filter(ImageFilter.GaussianBlur(radius=glow_radius))
+                overlay = Image.alpha_composite(blurred_glow, overlay)
+                draw = ImageDraw.Draw(overlay)
+
+            cur_y += th_h + line_gap
+
+        # 2. Call-To-Action Subtitle Text (Bold High-Readability Yellow/Gold Fill)
+        cta_w, cta_h = measure_text_with_spacing(draw, cta_text, font_cta, 2)
         cta_x = center_x - (cta_w // 2)
-        draw_readable_text(draw, (cta_x, cur_y), cta_text, font_cta, (230, 230, 250, alpha), 2)
-        cur_y += cta_h + int(h * 0.05)
+        draw_bold_readable_text(draw, (cta_x, cur_y), cta_text, font_cta, (255, 220, 40, alpha), 2)
+        cur_y += cta_h + line_gap
 
-        # 3. Pulsing Subscribe Button
+        # 3. Prominent Pulsing Subscribe Button
         if config.get("outro_show_subscribe", True):
             btn_text = "SUBSCRIBE"
-            pulse_period = 1.5
-            pulse_scale = 1.0 + 0.03 * math.sin((2.0 * math.pi * rel_t) / pulse_period)
+            pulse_period = 1.4
+            pulse_scale = 1.0 + 0.04 * math.sin((2.0 * math.pi * rel_t) / pulse_period)
 
-            btn_font_s = max(16, int(font_btn_size * pulse_scale))
+            btn_font_s = max(18, int(font_btn_size * pulse_scale))
             btn_font_curr = get_cached_font("DejaVuSans-Bold.ttf", btn_font_s)
-            bw, bh = measure_text_with_spacing(draw, btn_text, btn_font_curr, 2)
+            bw, bh = measure_text_with_spacing(draw, btn_text, btn_font_curr, 3)
 
-            pad_x, pad_y = 36, 16
+            pad_x, pad_y = max(30, int(font_btn_size * 0.8)), max(10, int(font_btn_size * 0.35))
             btn_w = bw + pad_x * 2
             btn_h = bh + pad_y * 2
             btn_x = center_x - (btn_w // 2)
 
             btn_bg = (accent_color[0], accent_color[1], accent_color[2], alpha)
-            draw.rounded_rectangle([btn_x, cur_y, btn_x + btn_w, cur_y + btn_h], radius=25, fill=btn_bg, outline=(0, 0, 0, alpha), width=2)
+            draw.rounded_rectangle([btn_x, cur_y, btn_x + btn_w, cur_y + btn_h], radius=int(btn_h * 0.4), fill=btn_bg, outline=(255, 255, 255, alpha), width=3)
 
             btn_tx = btn_x + pad_x
             btn_ty = cur_y + pad_y
-            draw_text_with_spacing(draw, (btn_tx, btn_ty), btn_text, btn_font_curr, (255, 255, 255, alpha), 2)
+            draw_text_with_spacing(draw, (btn_tx, btn_ty), btn_text, btn_font_curr, (255, 255, 255, alpha), 3)
 
-            cur_y += btn_h + int(h * 0.05)
+            cur_y += btn_h + line_gap
 
         # 4. Like & Share Badges
         if config.get("outro_show_like", True):
             like_badge = "👍 LIKE   🔔 NOTIFY   ↗ SHARE"
-            lw, lh = measure_text_with_spacing(draw, like_badge, font_channel, 2)
+            lw, lh = measure_text_with_spacing(draw, like_badge, font_badges, 2)
             lx = center_x - (lw // 2)
-            draw_readable_text(draw, (lx, cur_y), like_badge, font_channel, (180, 200, 240, alpha), 2)
-            cur_y += lh + int(h * 0.04)
+            draw_bold_readable_text(draw, (lx, cur_y), like_badge, font_badges, (210, 230, 255, alpha), 2)
+            cur_y += lh + int(line_gap * 0.8)
 
         # 5. Channel Handle
         if channel_name:
+            ch_w, ch_h = measure_text_with_spacing(draw, channel_name, font_channel, 2)
             cx_x = center_x - (ch_w // 2)
-            draw_readable_text(draw, (cx_x, cur_y), channel_name, font_channel, (255, 235, 59, alpha), 2)
+            draw_bold_readable_text(draw, (cx_x, cur_y), channel_name, font_channel, (255, 215, 0, alpha), 2)
 
         final_pil = Image.alpha_composite(base_pil, overlay).convert("RGB")
         return np.array(final_pil)
 
     except Exception:
         return frame
+

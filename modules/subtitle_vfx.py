@@ -58,10 +58,29 @@ FONT_MAP = {
 }
 
 def resolve_font_path(font_name: str) -> str:
-    if font_name in FONT_MAP and os.path.exists(FONT_MAP[font_name]):
-        return FONT_MAP[font_name]
-    if os.path.exists(font_name):
-        return font_name
+    target = FONT_MAP.get(font_name, font_name)
+    fname = os.path.basename(target)
+    
+    # 1. Direct file check
+    if os.path.exists(target):
+        return target
+    if os.path.exists(fname):
+        return fname
+
+    # 2. System fonts search locations (Windows, Linux, macOS)
+    sys_dirs = [
+        "C:/Windows/Fonts",
+        "/usr/share/fonts",
+        "/usr/share/fonts/truetype",
+        "/usr/share/fonts/TTF",
+        "/Library/Fonts",
+        "/System/Library/Fonts",
+    ]
+    for d in sys_dirs:
+        candidate = os.path.join(d, fname)
+        if os.path.exists(candidate):
+            return candidate
+
     return "DejaVuSans-Bold.ttf"
 
 
@@ -237,7 +256,7 @@ def draw_kinetic_subtitles(frame, text, t, duration, config, word_timestamps=Non
             final_words.append(w_str)
 
     # 5. Cached Font Retrieval
-    base_font_size = max(24, int(h * 0.055 * size_scale))
+    base_font_size = max(32, int(h * 0.075 * size_scale))
     font = get_cached_font(font_file_name, base_font_size)
 
     base_pil = Image.fromarray(frame).convert("RGBA")
@@ -248,17 +267,33 @@ def draw_kinetic_subtitles(frame, text, t, duration, config, word_timestamps=Non
     base_space_w, _ = measure_text_with_spacing(draw, " ", font, letter_spacing)
     space_w = base_space_w + word_spacing
 
+    max_container_w = int(w * (float(config.get("max_width_pct", 85)) / 100.0))
+
     lines = []
     if layout_mode == "Two Lines" and len(final_words) > 3:
         mid = len(final_words) // 2
         lines = [(final_words[:mid], 0), (final_words[mid:], mid)]
     elif layout_mode == "Single Line" or layout_mode == "Full Sentence":
         total_line_w = sum(d[0] for d in word_dims) + space_w * max(0, len(final_words) - 1)
-        if total_line_w > (w - 80) and len(final_words) > 2:
-            mid = len(final_words) // 2
-            lines = [(final_words[:mid], 0), (final_words[mid:], mid)]
+        if total_line_w > max_container_w and len(final_words) > 1:
+            # Wrap into multi-line chunk
+            cur_line = []
+            cur_offset = 0
+            cur_w = 0
+            for idx, w_str in enumerate(final_words):
+                w_w, _ = word_dims[idx]
+                if cur_w + w_w + space_w > max_container_w and cur_line:
+                    lines.append((cur_line, cur_offset))
+                    cur_line = [w_str]
+                    cur_offset = idx
+                    cur_w = w_w
+                else:
+                    cur_line.append(w_str)
+                    cur_w += w_w + space_w
+            if cur_line:
+                lines.append((cur_line, cur_offset))
         else:
-            lines = [(final_words, 0)]
+            lines.append((final_words, 0))
     else:
         lines = [(final_words, 0)]
 
@@ -446,6 +481,11 @@ def apply_cinematic_vfx(frame: np.ndarray, text: str, t: float,
     if config.get("map_location"):
         frame = draw_map_location_overlay(frame, config["map_location"])
 
+    # 4. Fact Text Overlay (Styled Text Only, No Background Box)
+    if config.get("fact_text"):
+        from modules.fact_text_overlay import apply_fact_text_overlay
+        frame = apply_fact_text_overlay(frame, t, duration, config)
+
     return frame
 
 
@@ -475,8 +515,8 @@ def draw_fact_card_overlay(frame, fact_data, t=0.0, duration=1.0):
 
     lbl_size = max(13, int(h * 0.020))
     val_size = max(17, int(h * 0.030))
-    font_lbl = get_cached_font("C:/Windows/Fonts/arialbd.ttf", lbl_size)
-    font_val = get_cached_font("C:/Windows/Fonts/impact.ttf", val_size)
+    font_lbl = get_cached_font("arialbd.ttf", lbl_size)
+    font_val = get_cached_font("impact.ttf", val_size)
 
     lbl_bbox = font_lbl.getbbox(label)
     val_bbox = font_val.getbbox(val)
@@ -505,7 +545,7 @@ def draw_map_location_overlay(frame, location_name: str):
     draw = ImageDraw.Draw(img, "RGBA")
 
     font_size = max(14, int(h * 0.024))
-    font = get_cached_font("C:/Windows/Fonts/arialbd.ttf", font_size)
+    font = get_cached_font("arialbd.ttf", font_size)
 
     bbox = font.getbbox(loc_str)
     badge_w = (bbox[2] - bbox[0]) + 30

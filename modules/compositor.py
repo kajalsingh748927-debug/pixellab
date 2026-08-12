@@ -94,6 +94,33 @@ def safe_encoder_config(encoder_choice: str):
     return "libx264", ["-crf", "18", "-pix_fmt", "yuv420p"]
 
 
+def write_chunk_safely(clip, chunk_file: str, **write_kwargs):
+    """
+    Atomic Chunk Writer: Write chunk to a temporary file first (ending with _tmp.mp4),
+    then atomically renames to final destination once writing succeeds.
+    Prevents half-written or corrupted chunk files from misleading the Resume Engine.
+    """
+    if chunk_file.endswith(".mp4"):
+        temp_chunk_file = chunk_file[:-4] + "_tmp.mp4"
+    else:
+        temp_chunk_file = chunk_file + "_tmp.mp4"
+
+    if os.path.exists(temp_chunk_file):
+        try:
+            os.remove(temp_chunk_file)
+        except Exception:
+            pass
+
+    clip.write_videofile(temp_chunk_file, **write_kwargs)
+    if os.path.exists(temp_chunk_file) and os.path.getsize(temp_chunk_file) > 10000:
+        if os.path.exists(chunk_file):
+            try:
+                os.remove(chunk_file)
+            except Exception:
+                pass
+        os.replace(temp_chunk_file, chunk_file)
+
+
 def apply_subtitles_with_time(clip, narration, duration, config, word_timestamps=None):
     def subtitle_filter(get_frame, t):
         return apply_cinematic_vfx(
@@ -163,7 +190,13 @@ def build_master_video_from_audio(
     def update_and_notify(pct, msg):
         elapsed = time.time() - start_time
         if progress_callback:
-            progress_callback(pct, msg, scene_states, elapsed)
+            try:
+                progress_callback(pct, msg, scene_states, elapsed)
+            except TypeError:
+                try:
+                    progress_callback(pct, msg)
+                except Exception:
+                    pass
 
     update_and_notify(5, f"🎤 Custom Audio Mode — Building {total_scenes} scenes from uploaded audio...")
 
@@ -183,6 +216,29 @@ def build_master_video_from_audio(
         end_sec    = sc.get("end_sec", 10.0)
         audio_dur  = max(end_sec - start_sec, 1.0)
         word_ts    = sc.get("word_timestamps", [])
+
+        chunk_file = os.path.join(TEMP_DIR, f"scene_chunk_{idx:02d}.mp4")
+
+        # ── ⚡ SCENE RESUME ENGINE: Skip chunks already rendered in prior run ──
+        force_rebuild = config.get("force_rebuild_chunks", False)
+        if not force_rebuild and os.path.exists(chunk_file) and os.path.getsize(chunk_file) > 50000:
+            safe_print(f"⏩ [RESUME ENGINE] Scene {idx}/{total_scenes} chunk ready — skipping render: {os.path.basename(chunk_file)}")
+            processed_clips.append(chunk_file)
+            cur_state["video_status"] = "✅ Cached"
+            cur_state["vfx_status"]   = "✅ Complete"
+            cur_state["overall"]    = "✅ Complete"
+            scenes_done += 1
+            
+            elapsed     = time.time() - start_time
+            scenes_left = total_scenes - idx
+            avg_per_scene = elapsed / max(scenes_done, 1)
+            eta_sec     = avg_per_scene * scenes_left
+            update_and_notify(
+                int(10 + (idx / max(total_scenes, 1)) * 72),
+                f"⚡ Resuming Scene {idx}/{total_scenes} (Cached) | "
+                f"✅ {scenes_done} Done | ⏳ {scenes_left} Left"
+            )
+            continue
 
         scenes_left   = total_scenes - idx
         elapsed       = time.time() - start_time
@@ -281,6 +337,7 @@ def build_master_video_from_audio(
         scene_cfg = dict(config)
         scene_cfg["emphasis_words"] = cur_state.get("emphasis_words", [])
         scene_cfg["fact_card"]      = cur_state.get("fact_card")
+        scene_cfg["fact_text"]      = cur_state.get("fact_text") or (cur_state.get("fact_card", {}).get("stat_value") if isinstance(cur_state.get("fact_card"), dict) else None)
         scene_cfg["map_location"]   = cur_state.get("map_location")
 
         def subtitle_filter(get_frame, t, _text=sub_text_to_render, _ts=ts_for_sub, _cfg=scene_cfg):
@@ -318,21 +375,20 @@ def build_master_video_from_audio(
         if fade_dur > 0:
             clip = clip.with_effects([vfx.CrossFadeIn(fade_dur), vfx.CrossFadeOut(fade_dur)])
 
-        # ── Write scene chunk ───────────────────────────────────────────────────
-        chunk_file = os.path.join(TEMP_DIR, f"scene_chunk_{idx:02d}.mp4")
-
+        # ── Write scene chunk with ultrafast multi-threaded encoding ─────────────
         write_kwargs = dict(
             codec=codec,
             audio=False,
             fps=FPS,
             bitrate=DEFAULT_BITRATE,
             ffmpeg_params=ffmpeg_params,
-            logger="bar",
+            logger=None,
+            threads=max(2, (os.cpu_count() or 4)),
         )
         if codec == "libx264":
-            write_kwargs["preset"] = DEFAULT_PRESET
+            write_kwargs["preset"] = config.get("ffmpeg_preset", "ultrafast")
 
-        clip.write_videofile(chunk_file, **write_kwargs)
+        write_chunk_safely(clip, chunk_file, **write_kwargs)
         clip.close()
         del clip
         gc.collect()
@@ -366,7 +422,7 @@ def build_master_video_from_audio(
     unmuxed_video_path = os.path.join(TEMP_DIR, "unmuxed_master.mp4")
     ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
 
-    if enable_trans and len(processed_clips) > 1:
+    if enable_trans and 1 < len(processed_clips) <= 10:
         t_start_trans = time.time()
         update_and_notify(84, f"🔀 Applying cinematic transitions to {len(processed_clips)} scenes...")
         from modules.transitions import get_random_transition, apply_transition
@@ -405,8 +461,10 @@ def build_master_video_from_audio(
             cur_clip.write_videofile(unmuxed_video_path, **master_write_kwargs)
             cur_clip.close()
             for c in loaded_clips:
-                try: c.close()
-                except: pass
+                try:
+                    c.close()
+                except Exception as close_err:
+                    safe_print(f"Clip cleanup notice: {close_err}")
 
     if not os.path.exists(unmuxed_video_path):
         # Fast Stream Copy Concat
@@ -478,12 +536,10 @@ def build_master_video_from_audio(
     safe_print(f"\n🎉 Done: {final_output_path}  (Total time: {fmt_time(total_time)})")
 
     # ── Temp Cleanup ───────────────────────────────────────────────────────────
+    from modules.error_handler import safe_file_cleanup
     if os.path.exists(TEMP_DIR):
-        for item in os.listdir(TEMP_DIR):
-            p = os.path.join(TEMP_DIR, item)
-            try:
-                if os.path.isfile(p): os.remove(p)
-            except: pass
+        temp_files = [os.path.join(TEMP_DIR, item) for item in os.listdir(TEMP_DIR) if os.path.isfile(os.path.join(TEMP_DIR, item))]
+        safe_file_cleanup(temp_files)
 
     update_and_notify(
         100,

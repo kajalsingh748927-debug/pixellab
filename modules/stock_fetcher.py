@@ -338,9 +338,9 @@ def fetch_stock_clips_parallel(scenes: list, progress_callback=None, video_brief
         )
         return idx, clip_path
 
-    max_workers = min(3, max(1, total))
+    max_workers = min(12, max(1, total))
     safe_print(
-        f"  Parallel stock downloader: {total} scenes, {max_workers} threads (memory-optimized)..."
+        f"  Parallel stock downloader: {total} scenes, {max_workers} threads (fast parallel download)..."
     )
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [executor.submit(_fetch_single, i, sc) for i, sc in enumerate(scenes)]

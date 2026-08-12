@@ -17,8 +17,8 @@ import json
 import re
 from groq import Groq
 
-DEFAULT_MODEL = "openai/gpt-oss-120b"
-FALLBACK_MODEL = "llama-3.3-70b-versatile"
+DEFAULT_MODEL = "llama-3.3-70b-versatile"
+FALLBACK_MODEL = "llama-3.1-8b-instant"
 
 
 def safe_print(msg):
@@ -389,58 +389,98 @@ def analyze_transcript(scenes: list, api_key: str, tone: str = "Cinematic & Epic
         return scenes
 
 
-def extract_title_and_facts(script_text: str, api_key: str = None) -> dict:
+def extract_title_and_facts(script_text: str, api_key: str = None, estimated_duration: float = None) -> dict:
     """
-    AI Director script reviewer:
-      1. Extracts 1 punchy high-CTR title + 2 backup titles.
-      2. Extracts 3 to 8 traceable facts with confidence tags & source snippets.
-    Returns schema:
-      {
-        "title": "...",
-        "title_alt": ["...", "..."],
-        "facts": [...]
-      }
+    AI Director script reviewer with STRICT FACT EXTRACTION DEFINITION:
+      • A fact IS a small, standalone, checkable piece of info containing a number, date, comparison, or precise detail (under 12 words).
+      • A fact is NOT a sentence restatement, vague claim ('AI is big'), or split sentence fragment.
+      • Limit total facts by video length:
+          < 20s: max 1 fact | 20-45s: max 2 facts | 45-90s: max 3 facts | > 90s: max 4-5 facts
+      • If no precise numeric/dated facts exist, return [] (empty facts list). Quality over quantity.
     """
     api_key = api_key or os.environ.get("GROQ_API_KEY")
+
+    # 1. Estimate video length to cap fact count
+    words = [w for w in script_text.split() if w.strip()]
+    word_count = len(words)
+    est_dur = estimated_duration or (word_count / 2.3)  # ~140 wpm
+
+    if est_dur < 20:
+        max_facts = 1
+    elif est_dur < 45:
+        max_facts = 2
+    elif est_dur < 90:
+        max_facts = 3
+    else:
+        max_facts = 5
+
+    def _is_valid_strict_fact(fact_item: dict) -> bool:
+        """Enforces numeric/date/checkable detail, <12 words, and no vague restatements."""
+        txt = fact_item.get("text", "").strip()
+        if not txt:
+            return False
+        w_list = txt.split()
+        if len(w_list) > 12:
+            return False
+
+        # Reject vague phrases
+        vague_phrases = ["transforming the world", "big shift", "changing everything", "new era", "massive change"]
+        if any(vp in txt.lower() for vp in vague_phrases):
+            return False
+
+        # Must contain digit or numeric/dated word
+        has_digit = any(char.isdigit() for char in txt)
+        num_words = {"percent", "percentage", "billion", "million", "trillion", "thousand", "hundred", "year", "years", "month", "months", "first", "second", "third", "quarter", "half", "double", "triple", "300%", "45%"}
+        has_num_word = any(nw in txt.lower() for nw in num_words)
+
+        return has_digit or has_num_word
+
     if not api_key:
-        # Fallback extract without API key
         lines = [line.strip() for line in script_text.splitlines() if line.strip()]
         first_line = lines[0] if lines else "PIXELAB DOCUMENTARY"
+
+        # Search for strict numeric fact line
+        candidate_facts = []
+        for line in lines:
+            if any(char.isdigit() for char in line):
+                short_txt = " ".join(line.split()[:11])
+                candidate_facts.append({
+                    "text": short_txt,
+                    "confidence": "high",
+                    "category": "statistic",
+                    "source_snippet": line
+                })
+                if len(candidate_facts) >= max_facts:
+                    break
+
         return {
             "title": first_line[:55].title(),
             "title_alt": [first_line[:45].title(), "Inside The Story"],
-            "facts": [
-                {
-                    "text": first_line[:60],
-                    "confidence": "high",
-                    "category": "claim",
-                    "source_snippet": first_line
-                }
-            ]
+            "facts": candidate_facts
         }
 
     system_instruction = (
-        "You are an AI Video Director reviewing a voiceover script before production. You have two jobs:\n\n"
+        "You are a strict AI Video Director reviewing a script for titles and on-screen facts.\n\n"
         "1. TITLE EXTRACTION\n"
-        "- Write ONE punchy, high-CTR video title, max 60 characters.\n"
-        "- Must accurately represent actual script content without clickbait overstatement.\n"
-        "- Plain English, Title Case.\n"
-        "- Provide 2 backup title alternatives in 'title_alt'.\n\n"
-        "2. FACT & INFORMATION EXTRACTION\n"
-        "- Pull out 3 to 8 standalone facts or key pieces of information actually stated in the script.\n"
-        "- Each fact must be directly traceable to script text (never invent facts).\n"
-        "- Self-contained under 20 words.\n"
-        "- Include exact source sentence(s) in 'source_snippet'.\n"
-        "- Tag each fact with 'confidence' ('high'|'medium'|'low') and 'category' ('statistic'|'definition'|'claim'|'quote'|'timeline'|'other').\n\n"
-        "Return ONLY a JSON object with schema:\n"
+        "- Write ONE punchy high-CTR title, max 60 characters, Title Case, no clickbait overstatement.\n"
+        "- Provide 2 backup titles in 'title_alt'.\n\n"
+        "2. FACT EXTRACTION — STRICT DEFINITION & RULES\n"
+        "- A fact MUST be a small standalone checkable detail containing a NUMBER, DATE, PERCENTAGE, COMPARISON, or PRECISE MEASURABLE METRIC.\n"
+        "- Examples of REAL facts: 'Light takes 8 minutes from Sun to Earth', 'Brain has 86 billion neurons', 'Company founded in 2015', 'AI chip sales grew 300%'.\n"
+        "- REJECT VAGUE CLAIMS with no number/date ('AI is transforming world', 'big shift', 'narrator description').\n"
+        "- RULE 1: Each fact MUST be UNDER 12 WORDS (short enough to read in 2-3 seconds).\n"
+        "- RULE 2: NEVER split 1 sentence into multiple facts.\n"
+        f"- RULE 3: Max total facts allowed for this script length is {max_facts}.\n"
+        "- RULE 4: Quality over quantity. If script has no numeric/dated details, return EMPTY facts array 'facts': [].\n\n"
+        "Return ONLY JSON object schema:\n"
         "{\n"
         '  "title": "string",\n'
         '  "title_alt": ["string", "string"],\n'
         '  "facts": [\n'
         "    {\n"
-        '      "text": "string",\n'
+        '      "text": "string (UNDER 12 WORDS with number/date)",\n'
         '      "confidence": "high | medium | low",\n'
-        '      "category": "statistic | definition | claim | quote | timeline | other",\n'
+        '      "category": "statistic | timeline | claim | definition | quote | other",\n'
         '      "source_snippet": "string"\n'
         "    }\n"
         "  ]\n"
@@ -449,7 +489,34 @@ def extract_title_and_facts(script_text: str, api_key: str = None) -> dict:
 
     client = Groq(api_key=api_key)
     try:
-        return _call_groq_json(client, f"Script:\n{script_text}", system_prompt=system_instruction)
+        raw_res = _call_groq_json(client, f"Script:\n{script_text}", system_prompt=system_instruction)
+
+        # Post-process & filter strictly by user rules
+        raw_facts = raw_res.get("facts", [])
+        valid_facts = []
+        seen_sources = set()
+
+        for f in raw_facts:
+            src = f.get("source_snippet", "").strip().lower()
+            # Rule: Never split 1 sentence into multiple facts
+            if src in seen_sources:
+                continue
+
+            if _is_valid_strict_fact(f):
+                seen_sources.add(src)
+                # Trim text to max 11 words if needed
+                w_list = f.get("text", "").split()
+                if len(w_list) > 11:
+                    f["text"] = " ".join(w_list[:11])
+                valid_facts.append(f)
+                if len(valid_facts) >= max_facts:
+                    break
+
+        return {
+            "title": str(raw_res.get("title", "Documentary Title")).strip()[:60].title(),
+            "title_alt": [str(t).strip()[:60].title() for t in raw_res.get("title_alt", []) if t][:2],
+            "facts": valid_facts
+        }
     except Exception as e:
         safe_print(f"extract_title_and_facts notice: {e}")
         return {
